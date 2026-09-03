@@ -17,5 +17,14 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signUp(email: string, password: string, fullName: string) {
-  return supabase.auth.signUp({ email, password, options: { data: { full_name: fullName }, emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback` } })
+  return createClient().auth.signUp({
+    email,
+    password,
+    options: {
+      data: { full_name: fullName },
+      emailRedirectTo:
+        process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
+        `${window.location.origin}/auth/callback`,
+    },
+  })
 }
