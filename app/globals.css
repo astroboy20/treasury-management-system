@@ -6,6 +6,6 @@
 :root { color-scheme: light; --background: #fff; --foreground: #17201b; --card: #fff; --card-foreground: #17201b; --primary: #023B1E; --primary-hover: #07552d; --primary-foreground: #fff; --muted: #f4f6f4; --muted-foreground: #66716a; --border: #e3e8e4; --input: #e3e8e4; --ring: #6b9b7e; --destructive: #b42318; --radius: .75rem; }
 * { @apply border-border outline-ring/40; }
 html { background: var(--background); }
-body { @apply bg-background text-foreground; font-family: Arial, Helvetica, sans-serif; }
+body { @apply bg-background text-foreground font-sans; }
 button, a { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
