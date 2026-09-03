@@ -16,12 +16,12 @@ export async function signIn(email: string, password: string) {
   return createClient().auth.signInWithPassword({ email, password })
 }
 
-export async function signUp(email: string, password: string, fullName: string) {
+export async function signUp(email: string, password: string, fullName: string, roleCode: string) {
   return createClient().auth.signUp({
     email,
     password,
     options: {
-      data: { full_name: fullName },
+      data: { full_name: fullName, requested_role: roleCode },
       emailRedirectTo:
         process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
         `${window.location.origin}/auth/callback`,
