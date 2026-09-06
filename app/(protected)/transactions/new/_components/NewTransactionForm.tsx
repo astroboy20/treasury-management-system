@@ -228,8 +228,12 @@ export default function NewTransactionForm({ customers }: Props) {
 
   const selectedCustomerId   = watch('customerId')
   const selectedType         = watch('transactionType')
+  const selectedScenarioCode = watch('scenarioCode')
+  const requestedPayoutValue = watch('requestedPayout')
+  const requestedAmountValue = watch('requestedAmount')
   const isRollover           = ROLLOVER_TYPES.includes(selectedType)
   const isExternalPayment    = EXTERNAL_PAYMENT_TYPES.includes(selectedType)
+  const isPartialPrincipal   = isRollover && selectedScenarioCode === 'PARTIAL_PRINCIPAL'
 
   // Fetch investments when customer changes
   useEffect(() => {
@@ -263,6 +267,13 @@ export default function NewTransactionForm({ customers }: Props) {
       setValue('scenarioCode', undefined)
     }
   }, [isRollover, setValue])
+
+  // Clear requestedPayout when not a PARTIAL_PRINCIPAL rollover
+  useEffect(() => {
+    if (!isPartialPrincipal) {
+      setValue('requestedPayout', undefined)
+    }
+  }, [isPartialPrincipal, setValue])
 
   const busy = isSubmitting || isPending
 
@@ -405,6 +416,28 @@ export default function NewTransactionForm({ customers }: Props) {
             <FieldError message={errors.scenarioCode?.message} />
           </div>
 
+          {/* Requested Payout — visible only for PARTIAL_PRINCIPAL rollover */}
+          {isPartialPrincipal && (
+            <div>
+              <Label htmlFor="requestedPayout" required>
+                Requested Payout Amount (₦)
+              </Label>
+              <div className="mt-2">
+                <input
+                  id="requestedPayout"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Amount to be paid out"
+                  {...register('requestedPayout')}
+                  className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                    errors.requestedPayout ? 'border-destructive' : 'border-input'
+                  }`}
+                />
+              </div>
+              <FieldError message={errors.requestedPayout?.message} />
+            </div>
+          )}
+
           {/* Requested amount */}
           <div>
             <Label htmlFor="requestedAmount" required>
@@ -469,6 +502,52 @@ export default function NewTransactionForm({ customers }: Props) {
           </div>
         </div>
       </fieldset>
+
+      {/* ── Section: Partial Principal Preview — conditionally rendered for PARTIAL_PRINCIPAL rollover ── */}
+      {isPartialPrincipal && requestedPayoutValue && requestedAmountValue && (
+        (() => {
+          const principal = parseFloat(requestedAmountValue)
+          const payout = parseFloat(requestedPayoutValue)
+          const remaining = isFinite(principal) && isFinite(payout) && payout > 0 && payout < principal
+            ? principal - payout
+            : null
+
+          return (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-6 space-y-3">
+              <p className="text-sm font-semibold text-blue-700">
+                Partial Principal Rollover — Calculation Preview
+              </p>
+              <p className="text-xs text-blue-600/70">
+                Authoritative calculations run server-side using PostgreSQL NUMERIC arithmetic.
+                Values shown here are estimates for review only.
+              </p>
+              <dl className="grid gap-3 sm:grid-cols-3 text-sm">
+                <div>
+                  <dt className="text-xs font-medium text-muted-foreground">Original Principal</dt>
+                  <dd className="mt-1 font-mono tabular-nums text-foreground">
+                    {isFinite(principal) ? new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(principal) : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium text-muted-foreground">Requested Payout</dt>
+                  <dd className="mt-1 font-mono tabular-nums text-foreground">
+                    {isFinite(payout) ? new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(payout) : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium text-muted-foreground">Remaining Principal</dt>
+                  <dd className="mt-1 font-mono tabular-nums font-semibold text-foreground">
+                    {remaining !== null ? new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(remaining) : <span className="text-destructive text-xs">Payout must be less than principal</span>}
+                  </dd>
+                </div>
+              </dl>
+              <p className="text-xs text-blue-600/80">
+                Rule: remaining_principal = original_principal − requested_payout
+              </p>
+            </div>
+          )
+        })()
+      )}
 
       {/* ── Section: Payment Instruction — conditionally rendered for THIRD_PARTY_PAYMENT ── */}
       {isExternalPayment && (

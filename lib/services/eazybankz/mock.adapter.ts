@@ -15,6 +15,8 @@ import type {
   EazybankzInvestment,
   CreateInvestmentInput,
   CreateInvestmentResult,
+  UpdateInvestmentInput,
+  UpdateInvestmentResult,
 } from './adapter.interface'
 import { createClient } from '@/lib/supabase/server'
 
@@ -88,6 +90,65 @@ class MockEazybankzAdapter implements EazybankzAdapter {
     return {
       externalReference,
       status: 'ACTIVE',
+    }
+  }
+
+  /**
+   * Mock implementation of updateInvestment.
+   *
+   * Handles status transitions and balance updates for:
+   *   - MATURITY_TERMINATION  → status: 'TERMINATED'  (Req 18.3)
+   *   - PRE_LIQUIDATION       → rebooking / balance   (Req 19.5)
+   *   - ANNIVERSARY_PAYMENT   → reset accrued interest (Req 20.4)
+   *   - SAVINGS/CALL/CMS      → updated balance        (Req 24.3)
+   *
+   * Phase 1–5: updates the local `investments` table.
+   * Phase 6: will be replaced by a live Eazybankz HTTP call.
+   */
+  async updateInvestment(
+    externalReference: string,
+    data: UpdateInvestmentInput,
+  ): Promise<UpdateInvestmentResult> {
+    const supabase = await createClient()
+
+    // Build only the columns that were supplied
+    const updatePayload: Record<string, unknown> = {}
+    if (data.status !== undefined) updatePayload.status = data.status
+    if (data.outstandingBalance !== undefined)
+      updatePayload.outstanding_balance = data.outstandingBalance
+    if (data.availableAmount !== undefined) updatePayload.available_amount = data.availableAmount
+    if (data.accruedInterest !== undefined) updatePayload.accrued_interest = data.accruedInterest
+
+    if (Object.keys(updatePayload).length === 0) {
+      // Nothing to update — return the current status
+      const { data: existing } = await supabase
+        .from('investments')
+        .select('status')
+        .eq('external_reference', externalReference)
+        .maybeSingle()
+
+      return {
+        externalReference,
+        status: (existing?.status as string) ?? 'UNKNOWN',
+      }
+    }
+
+    const { data: updated, error } = await supabase
+      .from('investments')
+      .update(updatePayload)
+      .eq('external_reference', externalReference)
+      .select('status')
+      .maybeSingle()
+
+    if (error) {
+      throw new Error(
+        `MockEazybankzAdapter.updateInvestment failed: ${error.message ?? error.code ?? 'unknown'}`,
+      )
+    }
+
+    return {
+      externalReference,
+      status: (updated?.status as string) ?? (data.status ?? 'UNKNOWN'),
     }
   }
 }

@@ -9,7 +9,7 @@ import {
   TX_TYPE_TO_VOUCHER_TYPE,
 } from '@/lib/schemas/voucher.schema'
 import type { ActionResult } from '@/lib/actions/transaction.actions'
-import type { CalculationSnapshot } from '@/lib/services/calculation.service'
+import type { CalculationSnapshot, RolloverResult } from '@/lib/services/calculation.service'
 
 // ─── prepareVoucherAction ─────────────────────────────────────────────────────
 
@@ -190,8 +190,8 @@ export async function prepareVoucherAction(
 
         const requestedPayout =
           parsed.data.voucherType === 'ROLLOVER_SLIP' && scenarioCode === 'PARTIAL_PRINCIPAL'
-            ? // The ROLLOVER_SLIP form carries the payout amount in interestPayout for partial
-              (parsed.data as Record<string, unknown>).interestPayout as string | undefined
+            ? // The ROLLOVER_SLIP form carries the payout amount in requestedPayout for PARTIAL_PRINCIPAL (Req 17.4)
+              (parsed.data as import('@/lib/schemas/voucher.schema').RolloverSlipVoucherInput).requestedPayout
             : undefined
 
         calculationSnapshot = await calculateRollover(
@@ -257,9 +257,31 @@ export async function prepareVoucherAction(
   // RPC returns { voucher_id, voucher_number }
   const result = data as { voucher_id: string; voucher_number: string }
 
-  // 10. For ROLLOVER transactions, persist the rollover_details row (Req 17.2, 17.6)
+  // 10. For PRE_LIQUIDATION transactions, persist the pre_liquidation_details row (Req 19.3)
+  //     The calculation snapshot holds the authoritative values computed by the RPC.
+  if (txType === 'PRE_LIQUIDATION' && calculationSnapshot !== null) {
+    const preLiqCalc = calculationSnapshot as import('@/lib/services/calculation.service').PreLiquidationResult
+
+    await supabase.from('pre_liquidation_details').upsert(
+      {
+        transaction_id:      transactionId,
+        original_principal:  String(investmentSnapshot.principal),
+        accrued_interest:    String(investmentSnapshot.accrued_interest),
+        charge_rate:         '0.20',                // always 20% for PRE_LIQUIDATION (Req 19.3)
+        charge_amount:       preLiqCalc.charge,
+        net_interest:        preLiqCalc.netInterest,
+        // Partial pre-liquidation fields — only present when requestedPayout was supplied
+        requested_payout:    preLiqCalc.outputs?.requested_payout ?? null,
+        remaining_principal: preLiqCalc.remainingPrincipal ?? null,
+        rebooked_principal:  preLiqCalc.rebookedPrincipal ?? null,
+      },
+      { onConflict: 'transaction_id' },
+    )
+  }
+
+  // 11. For ROLLOVER transactions, persist the rollover_details row (Req 17.2, 17.3, 17.6)
   if (txType === 'ROLLOVER' && scenarioCode && calculationSnapshot !== null) {
-    const rolloverCalc = calculationSnapshot as import('@/lib/services/calculation.service').RolloverResult
+    const rolloverCalc = calculationSnapshot as RolloverResult
 
     const rolloverInput =
       parsed.data.voucherType === 'ROLLOVER_SLIP'
@@ -267,15 +289,37 @@ export async function prepareVoucherAction(
         : null
 
     if (rolloverInput) {
+      // For PRINCIPAL_ONLY:    principal_rolled = principal; interest_paid = interest_due
+      // For P_AND_I:           principal_rolled = rolloverAmount (principal + interest reinvested)
+      // For PARTIAL_PRINCIPAL: principal_rolled = remainingPrincipal (original_principal − requested_payout)
+      // For INTEREST_ONLY:     principal_rolled = principal (stays invested — not terminated)
+      const principalRolled =
+        scenarioCode === 'PRINCIPAL_ONLY'
+          ? rolloverCalc.principalRolled ?? null
+          : scenarioCode === 'P_AND_I'
+            ? rolloverCalc.rolloverAmount
+            : scenarioCode === 'PARTIAL_PRINCIPAL'
+              ? rolloverCalc.remainingPrincipal ?? null
+              : scenarioCode === 'INTEREST_ONLY'
+                ? rolloverCalc.rolloverAmount   // = principal (investment remains active)
+                : null
+
+      // requested_payout comes from the form's requestedPayout field for PARTIAL_PRINCIPAL (Req 17.4);
+      // for other rollover types (PRINCIPAL_ONLY / INTEREST_ONLY) it uses interestPayout.
+      const requestedPayoutValue =
+        scenarioCode === 'PARTIAL_PRINCIPAL'
+          ? rolloverInput.requestedPayout ?? null
+          : rolloverInput.interestPayout ?? null
+
       await supabase.from('rollover_details').upsert(
         {
           transaction_id: transactionId,
           rollover_type: scenarioCode,
           original_principal: String(investmentSnapshot.principal),
           interest_due: String(investmentSnapshot.accrued_interest),
-          principal_rolled:
-            scenarioCode === 'P_AND_I' ? rolloverCalc.rolloverAmount : null,
+          principal_rolled: principalRolled,
           interest_paid: rolloverCalc.interestPaid ?? null,
+          requested_payout: requestedPayoutValue,
           new_rate: rolloverInput.newRate,
           new_tenor: rolloverInput.newTenor,
           new_effective_date: rolloverInput.effectiveDate,
@@ -285,9 +329,61 @@ export async function prepareVoucherAction(
         { onConflict: 'transaction_id' },
       )
     }
+
+    // 10a. PRINCIPAL_ONLY / INTEREST_ONLY: create a linked FUNDS_OUT transaction for the interest payout.
+    //      Req 17.3 — PRINCIPAL_ONLY: after rollover voucher, create a linked FUNDS_OUT for interest payout.
+    //      Req 17.5 — INTEREST_ONLY:  principal stays invested; only interest is paid out via FUNDS_OUT.
+    if ((scenarioCode === 'PRINCIPAL_ONLY' || scenarioCode === 'INTEREST_ONLY') && rolloverInput) {
+      const interestPayoutAmount =
+        rolloverCalc.interestPaid ?? String(investmentSnapshot.accrued_interest)
+
+      // Load parent transaction to copy customer/investment details
+      const { data: parentTx } = await supabase
+        .from('treasury_transactions')
+        .select('customer_id, investment_id, created_by, purpose')
+        .eq('id', transactionId)
+        .single()
+
+      if (parentTx) {
+        // Build payment instruction payload from the rollover form if present
+        const rolloverData = parsed.data as import('@/lib/schemas/voucher.schema').RolloverSlipVoucherInput
+        const paymentInstructionPayload =
+          (rolloverData as Record<string, unknown>).paymentInstruction
+            ? JSON.stringify((rolloverData as Record<string, unknown>).paymentInstruction)
+            : null
+
+        const scenarioLabel =
+          scenarioCode === 'INTEREST_ONLY' ? 'Interest Only' : 'Principal Only'
+
+        // Create the linked FUNDS_OUT transaction via the RPC.
+        // The RPC generates its own TRX reference and audit event.
+        const { error: linkedTxError } = await supabase.rpc(
+          'create_treasury_transaction',
+          {
+            p_customer_id: parentTx.customer_id,
+            p_investment_id: parentTx.investment_id,
+            p_transaction_type: 'THIRD_PARTY_PAYMENT',
+            p_scenario_code: `${scenarioCode}_INTEREST_PAYOUT`,
+            p_requested_amount: interestPayoutAmount,
+            p_purpose: `Interest payout for Rollover (${scenarioLabel}) — linked to ${transactionId}`,
+            p_source_type: 'MANDATED',
+            p_payment_instruction: paymentInstructionPayload,
+          },
+        )
+
+        if (linkedTxError) {
+          // Non-fatal: log the failure but do not roll back the primary voucher.
+          // The Treasury Officer can create the FUNDS_OUT transaction manually.
+          console.error(
+            `[prepareVoucherAction] Failed to create linked FUNDS_OUT for ${scenarioCode} interest payout:`,
+            linkedTxError.message,
+          )
+        }
+      }
+    }
   }
 
-  // 11. Revalidate caches
+  // 12. Revalidate caches
   revalidatePath(`/transactions/${transactionId}`)
   revalidatePath('/transactions')
 

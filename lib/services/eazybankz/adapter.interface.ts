@@ -48,6 +48,28 @@ export interface CreateInvestmentResult {
   status: string
 }
 
+// ─── Input shape for updating an existing investment ─────────────────────────
+
+export interface UpdateInvestmentInput {
+  /** New status to set on the investment, e.g. 'TERMINATED', 'MATURED'. */
+  status?: 'ACTIVE' | 'TERMINATED' | 'ROLLED_OVER' | 'MATURED'
+  /** Updated outstanding balance after a payment (NUMERIC-compatible string). */
+  outstandingBalance?: string
+  /** Updated available amount after a payment (NUMERIC-compatible string). */
+  availableAmount?: string
+  /** Updated accrued interest after an interest payment (NUMERIC-compatible string). */
+  accruedInterest?: string
+  /** The Greenline transaction ID that triggered the update. */
+  sourceTransactionId?: string
+}
+
+export interface UpdateInvestmentResult {
+  /** The external reference of the updated investment. */
+  externalReference: string
+  /** The new status after the update. */
+  status: string
+}
+
 export interface EazybankzAdapter {
   /**
    * Fetch current investment data for a given external reference.
@@ -62,4 +84,20 @@ export interface EazybankzAdapter {
    * Phase 6: calls the live Eazybankz API.
    */
   createInvestment(input: CreateInvestmentInput): Promise<CreateInvestmentResult>
+
+  /**
+   * Update an existing investment record in the Eazybankz mirror.
+   * Called on Operations execution for:
+   *   - MATURITY_TERMINATION → status: 'TERMINATED' (Req 18.3)
+   *   - PRE_LIQUIDATION (partial) → updated principal after rebooking (Req 19.5)
+   *   - ANNIVERSARY_PAYMENT → updated accrued interest after payout (Req 20.4)
+   *   - SAVINGS/CALL/CMS_FUNDS_OUT → updated balance after withdrawal (Req 24.3)
+   *
+   * Phase 1–5: updates the local `investments` table as a mock.
+   * Phase 6: calls the live Eazybankz API.
+   */
+  updateInvestment(
+    externalReference: string,
+    data: UpdateInvestmentInput,
+  ): Promise<UpdateInvestmentResult>
 }

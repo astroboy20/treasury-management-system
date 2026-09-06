@@ -106,6 +106,15 @@ export const CreateTransactionSchema = z
 
     // paymentInstruction is conditionally required — enforced in .superRefine()
     paymentInstruction: PaymentInstructionSchema.optional(),
+
+    // requestedPayout is conditionally required for PARTIAL_PRINCIPAL rollovers
+    requestedPayout: z
+      .string()
+      .refine(
+        (val) => !val || (/^\d+(\.\d{1,4})?$/.test(val) && Number(val) > 0),
+        'Requested payout must be a positive number.',
+      )
+      .optional(),
   })
   .superRefine((data, ctx) => {
     // ROLLOVER transactions must supply a scenario code
@@ -114,6 +123,19 @@ export const CreateTransactionSchema = z
         code: z.ZodIssueCode.custom,
         path: ['scenarioCode'],
         message: 'Scenario code is required for rollover transactions.',
+      })
+    }
+
+    // PARTIAL_PRINCIPAL rollovers require a requestedPayout
+    if (
+      data.transactionType === 'ROLLOVER' &&
+      data.scenarioCode === 'PARTIAL_PRINCIPAL' &&
+      !data.requestedPayout
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['requestedPayout'],
+        message: 'Requested payout amount is required for Partial Principal rollovers.',
       })
     }
 

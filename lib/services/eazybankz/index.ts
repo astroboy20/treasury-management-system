@@ -13,4 +13,6 @@ export type {
   EazybankzInvestment,
   CreateInvestmentInput,
   CreateInvestmentResult,
+  UpdateInvestmentInput,
+  UpdateInvestmentResult,
 } from './adapter.interface'

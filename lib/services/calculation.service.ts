@@ -89,6 +89,12 @@ export type RolloverResult = CalculationSnapshot & {
   interestPaid?: string
   /** Present for PRINCIPAL_ONLY. Equals principal. */
   principalRolled?: string
+  /**
+   * Present for PARTIAL_PRINCIPAL.
+   * remaining_principal = original_principal - requested_payout
+   * This is the amount rolled over (reinvested) after the payout is deducted.
+   */
+  remainingPrincipal?: string
 }
 
 export type ThirdPartyChargeResult = CalculationSnapshot & {
@@ -247,6 +253,9 @@ export async function calculateRollover(
   }
   if (outputs.principal_rolled !== undefined) {
     result.principalRolled = outputs.principal_rolled
+  }
+  if (outputs.remaining_principal !== undefined) {
+    result.remainingPrincipal = outputs.remaining_principal
   }
 
   return result

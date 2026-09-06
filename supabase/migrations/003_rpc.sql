@@ -638,6 +638,67 @@ BEGIN
     v_actor_id
   );
 
+  -- 7a. For PRE_LIQUIDATION transactions, persist the pre_liquidation_details row (Req 19.3)
+  --     Values are read from the calculation_snapshot that was computed server-side
+  --     by the calculate_pre_liquidation RPC and attached to p_voucher_data.
+  IF v_tx.transaction_type = 'PRE_LIQUIDATION' THEN
+    DECLARE
+      v_snap_outputs   JSONB := COALESCE(v_calc_snapshot->'outputs', '{}');
+      v_snap_inputs    JSONB := COALESCE(v_calc_snapshot->'inputs',  '{}');
+      v_inv            investment_verifications%ROWTYPE;
+    BEGIN
+      -- Load the investment snapshot for principal and accrued_interest
+      SELECT * INTO v_inv FROM investment_verifications
+      WHERE transaction_id = p_transaction_id;
+
+      INSERT INTO pre_liquidation_details (
+        transaction_id,
+        original_principal,
+        accrued_interest,
+        charge_rate,
+        charge_amount,
+        net_interest,
+        requested_payout,
+        remaining_principal,
+        rebooked_principal
+      ) VALUES (
+        p_transaction_id,
+        -- original_principal from investment snapshot; fall back to voucher principal field
+        COALESCE(v_inv.principal, (p_voucher_data->>'principal')::NUMERIC),
+        -- accrued_interest from snapshot or inputs
+        COALESCE(
+          v_inv.accrued_interest,
+          (v_snap_inputs->>'accrued_interest')::NUMERIC,
+          (p_voucher_data->>'interest')::NUMERIC
+        ),
+        -- charge_rate always 0.20 (Req 19.3)
+        0.20,
+        -- charge_amount from calculation outputs
+        COALESCE(
+          (v_snap_outputs->>'charge')::NUMERIC,
+          (p_voucher_data->>'charge')::NUMERIC,
+          0
+        ),
+        -- net_interest from calculation outputs
+        COALESCE(
+          (v_snap_outputs->>'net_interest')::NUMERIC
+        ),
+        -- requested_payout — only present for partial pre-liquidation
+        NULLIF((v_snap_inputs->>'requested_payout')::TEXT, '')::NUMERIC,
+        -- remaining_principal — only present for partial pre-liquidation
+        NULLIF((v_snap_outputs->>'remaining_principal')::TEXT, '')::NUMERIC,
+        -- rebooked_principal — only present for partial pre-liquidation
+        NULLIF((v_snap_outputs->>'rebooked_principal')::TEXT, '')::NUMERIC
+      )
+      ON CONFLICT (transaction_id) DO UPDATE SET
+        charge_amount       = EXCLUDED.charge_amount,
+        net_interest        = EXCLUDED.net_interest,
+        requested_payout    = EXCLUDED.requested_payout,
+        remaining_principal = EXCLUDED.remaining_principal,
+        rebooked_principal  = EXCLUDED.rebooked_principal;
+    END;
+  END IF;
+
   -- 8. Update transaction status
   UPDATE treasury_transactions
   SET status = 'VOUCHER_PREPARED', updated_at = NOW()

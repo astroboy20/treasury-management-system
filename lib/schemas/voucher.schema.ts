@@ -110,11 +110,11 @@ export const FundsOutVoucherSchema = z.object({
   // interest may be 0 for certain scenarios
   interest: numericString('Interest'),
 
-  // WHT — defaults to 0 per SOP (optional; server defaults to 0 if absent)
-  wht: numericString('WHT').optional(),
+  // WHT — defaults to 0 per SOP
+  wht: numericString('WHT').default('0'),
 
-  // charge — pre-liquidation charge; 0 for maturity/anniversary (optional; server defaults to 0)
-  charge: numericString('Charge').optional(),
+  // charge — pre-liquidation charge; 0 for maturity/anniversary
+  charge: numericString('Charge').default('0'),
 
   // net_amount — authoritative value computed by server; submitted
   // for display/confirmation; server validates against snapshot
@@ -122,6 +122,10 @@ export const FundsOutVoucherSchema = z.object({
 
   // availableBalance — for SAVINGS/CALL/CMS Funds-Out (Req 38)
   availableBalance: numericString('Available balance').optional(),
+
+  // requestedPayout — for partial PRE_LIQUIDATION (Req 19.2)
+  // The amount being paid out from the principal; triggers rebooked_principal computation.
+  requestedPayout: positiveNumericString('Requested payout').optional(),
 
   transferDate: isoDateString('Transfer date'),
   remarks,
@@ -165,6 +169,9 @@ export const RolloverSlipVoucherSchema = z.object({
 
   // Optional: interest payout amount for PRINCIPAL_ONLY / INTEREST_ONLY rollovers
   interestPayout: numericString('Interest payout').optional(),
+
+  // Optional: requested payout amount for PARTIAL_PRINCIPAL rollovers (Req 17.4)
+  requestedPayout: positiveNumericString('Requested payout').optional(),
 
   remarks,
 })

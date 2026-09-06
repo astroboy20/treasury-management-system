@@ -348,37 +348,37 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - On Operations execution: call `eazybankzAdapter.createInvestment()` to book the rolled investment.
     - _Requirements: 17.1, 17.2, 17.6, 17.7_
 
-  - [ ] 3.2 Rollover Principal Only scenario
+  - [x] 3.2 Rollover Principal Only scenario
     - Support `scenario_code: 'PRINCIPAL_ONLY'`.
     - `calculateRollover('PRINCIPAL_ONLY', ...)`: `principalRolled = principal`, `interestPaid = interestDue`.
     - After rollover voucher, create a linked `FUNDS_OUT` transaction for interest payout with external payment details if required.
     - _Requirements: 17.1, 17.3_
 
-  - [ ] 3.3 Rollover Partial Principal scenario
+  - [x] 3.3 Rollover Partial Principal scenario
     - Support `scenario_code: 'PARTIAL_PRINCIPAL'` with `requestedPayout` field on the creation form.
     - `calculateRollover('PARTIAL_PRINCIPAL', principal, interestDue, requestedPayout)`: compute `remaining_principal = principal - requestedPayout`; display all intermediate values before voucher preparation.
     - _Requirements: 17.1, 17.4_
 
-  - [ ] 3.4 Rollover Interest Only scenario
+  - [x] 3.4 Rollover Interest Only scenario
     - Support `scenario_code: 'INTEREST_ONLY'`.
     - `calculateRollover('INTEREST_ONLY', ...)`: interest Funds-Out for `interestDue`; principal investment remains active in Eazybankz.
     - _Requirements: 17.1, 17.5_
 
-  - [ ] 3.5 Maturity Termination scenario
+  - [x] 3.5 Maturity Termination scenario
     - Support `transaction_type: 'MATURITY_TERMINATION'`.
     - `calculateMaturityTermination(principal, accruedInterest)`: WHT = 0; `netAmount = principal + accrued_interest`.
     - Generate `FUNDS_OUT` voucher with all required fields; enforce external payment block if applicable.
     - On Operations execution: call `eazybankzAdapter.updateInvestment()` with `status: 'TERMINATED'`.
     - _Requirements: 18.1, 18.2, 18.3_
 
-  - [ ] 3.6 Full Pre-liquidation scenario
+  - [x] 3.6 Full Pre-liquidation scenario
     - Support `transaction_type: 'PRE_LIQUIDATION'` with no `requestedPayout` (full liquidation).
     - `calculatePreLiquidation(accruedInterest)`: `charge = accrued_interest × 0.20`, `net_interest = accrued_interest - charge`.
     - Persist `pre_liquidation_details` row with all fields including `charge_rate = 0.20`.
     - Attach `PRE_LIQUIDATION_20_PERCENT` calculation snapshot to voucher.
     - _Requirements: 19.1, 19.3, 19.4_
 
-  - [ ] 3.7 Partial Pre-liquidation scenario
+  - [-] 3.7 Partial Pre-liquidation scenario
     - Extend `PRE_LIQUIDATION` path with `requestedPayout` field.
     - `calculatePreLiquidation(accruedInterest, requestedPayout)`: compute `remaining_principal`, `rebooked_principal`; display all intermediate values before voucher preparation.
     - On Operations execution: call `eazybankzAdapter.updateInvestment()` to rebook remaining principal.

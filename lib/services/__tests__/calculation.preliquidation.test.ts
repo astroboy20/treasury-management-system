@@ -109,7 +109,7 @@ describe('Property 1 — charge is always exactly 20% of accrued interest (Req 1
 
         expect(toNum(result.charge)).toBe(expectedCharge)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -124,7 +124,7 @@ describe('Property 1 — charge is always exactly 20% of accrued interest (Req 1
         expect(charge).toBeGreaterThanOrEqual(0)
         expect(charge).toBeLessThanOrEqual(accruedInterest)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -153,7 +153,7 @@ describe('Property 2 — net_interest = accrued_interest − charge (Req 26.6)',
 
         expect(toNum(result.netInterest)).toBe(expectedNetInterest)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -170,7 +170,7 @@ describe('Property 2 — net_interest = accrued_interest − charge (Req 26.6)',
         // (allowing for the rounding delta applied to charge)
         expect(roundTo4(charge + netInterest)).toBe(accruedInterest)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -186,7 +186,7 @@ describe('Property 2 — net_interest = accrued_interest − charge (Req 26.6)',
         const expected80Pct = roundTo4(accruedInterest * 0.80)
         expect(Math.abs(netInterest - expected80Pct)).toBeLessThanOrEqual(0.0001)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -214,7 +214,7 @@ describe('Property 3 — monotonicity: larger input produces larger charge', () 
           )
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })

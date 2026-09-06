@@ -154,6 +154,65 @@ function FormField({ id, label, required = true, hint, error, children }: FormFi
   )
 }
 
+// ─── Partial Principal Intermediate Values ────────────────────────────────────
+
+/**
+ * Displays the intermediate values for a PARTIAL_PRINCIPAL rollover before
+ * voucher preparation (Req 17.4).
+ *
+ * Shows Original Principal, Requested Payout, Remaining Principal, and
+ * Interest Due — computed live from the investment snapshot so the Treasury
+ * Officer can confirm the figures before proceeding.
+ *
+ * Note: the `requestedPayout` value is read from the `calculation_snapshot`
+ * on the investment verification record when available. If not yet persisted,
+ * it falls back to the voucher form's state (handled by the parent component).
+ * Authoritative computation runs server-side via PostgreSQL NUMERIC.
+ */
+function PartialPrincipalIntermediateValues({
+  snapshot,
+  requestedPayout,
+}: {
+  snapshot: NonNullable<TransactionWorkspace['investmentVerification']>
+  requestedPayout?: string | null
+}) {
+  const principal = parseFloat(snapshot.principal)
+  const payout = requestedPayout ? parseFloat(requestedPayout) : null
+  const remaining =
+    payout !== null && isFinite(payout) && isFinite(principal) && payout > 0 && payout < principal
+      ? (principal - payout).toFixed(4)
+      : null
+
+  return (
+    <>
+      <Field label="Original Principal" value={formatCurrency(snapshot.principal)} />
+      <Field
+        label="Requested Payout"
+        value={
+          payout !== null && isFinite(payout)
+            ? formatCurrency(String(payout))
+            : <span className="italic text-muted-foreground">Enter requested payout in the form below</span>
+        }
+      />
+      <Field
+        label="Remaining Principal (= Principal − Payout)"
+        value={
+          remaining !== null
+            ? formatCurrency(remaining)
+            : <span className="italic text-muted-foreground text-xs">Computed once payout is entered</span>
+        }
+      />
+      <Field label="Interest Due" value={formatCurrency(snapshot.accrued_interest)} />
+      <div className="sm:col-span-2">
+        <p className="text-xs text-blue-600/80">
+          Rule: remaining_principal = original_principal − requested_payout.
+          Confirm these values before proceeding to voucher preparation.
+        </p>
+      </div>
+    </>
+  )
+}
+
 // ─── Calculation Preview ──────────────────────────────────────────────────────
 
 /**
@@ -163,9 +222,14 @@ function FormField({ id, label, required = true, hint, error, children }: FormFi
 function CalculationPreview({
   snapshot,
   transactionType,
+  scenarioCode,
+  requestedPayout,
 }: {
   snapshot: NonNullable<TransactionWorkspace['investmentVerification']>
   transactionType: string
+  scenarioCode?: string | null
+  /** For PARTIAL_PRINCIPAL: the payout amount entered by the Treasury Officer */
+  requestedPayout?: string | null
 }) {
   return (
     <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4 space-y-3">
@@ -198,6 +262,50 @@ function CalculationPreview({
                 String(parseFloat(snapshot.accrued_interest) * 0.8),
               )}
             />
+            {requestedPayout && Number(requestedPayout) > 0 && (
+              <>
+                <div className="sm:col-span-2">
+                  <Separator className="my-1" />
+                  <p className="text-xs font-medium text-blue-700 mt-2">Partial pre-liquidation — intermediate values (Req 19.2)</p>
+                </div>
+                <Field
+                  label="Original Principal"
+                  value={formatCurrency(snapshot.principal)}
+                />
+                <Field
+                  label="Requested Payout"
+                  value={formatCurrency(String(Number(requestedPayout)))}
+                />
+                <Field
+                  label="Remaining Principal (= Principal − Payout)"
+                  value={
+                    Number(requestedPayout) < parseFloat(snapshot.principal)
+                      ? formatCurrency(String(parseFloat(snapshot.principal) - Number(requestedPayout)))
+                      : <span className="text-destructive text-xs">Payout exceeds principal</span>
+                  }
+                />
+                <Field
+                  label="Rebooked Principal (= Remaining − Charge)"
+                  value={
+                    Number(requestedPayout) < parseFloat(snapshot.principal)
+                      ? formatCurrency(
+                          String(
+                            parseFloat(snapshot.principal) -
+                              Number(requestedPayout) -
+                              parseFloat(snapshot.accrued_interest) * 0.2,
+                          ),
+                        )
+                      : '—'
+                  }
+                />
+                <div className="sm:col-span-2">
+                  <p className="text-xs text-blue-600/80">
+                    Rule: rebooked_principal = remaining_principal − charge.
+                    Authoritative values computed server-side via PostgreSQL NUMERIC.
+                  </p>
+                </div>
+              </>
+            )}
           </>
         )}
         {transactionType === 'THIRD_PARTY_PAYMENT' && (
@@ -219,19 +327,66 @@ function CalculationPreview({
             <div className="sm:col-span-2">
               <Separator className="my-1" />
               <p className="text-xs font-medium text-blue-700 mt-2">
-                P+I Rollover — estimated amounts
+                {scenarioCode === 'PRINCIPAL_ONLY'
+                  ? 'Principal Only Rollover — estimated amounts'
+                  : scenarioCode === 'PARTIAL_PRINCIPAL'
+                  ? 'Partial Principal Rollover — intermediate values'
+                  : scenarioCode === 'INTEREST_ONLY'
+                  ? 'Interest Only Rollover — estimated amounts'
+                  : 'P+I Rollover — estimated amounts'}
               </p>
             </div>
-            <Field
-              label="Rollover Amount (Principal + Interest)"
-              value={formatCurrency(
-                String(parseFloat(snapshot.principal) + parseFloat(snapshot.accrued_interest)),
-              )}
-            />
-            <Field
-              label="No external payment"
-              value="Both principal and interest are reinvested"
-            />
+            {scenarioCode === 'PRINCIPAL_ONLY' ? (
+              <>
+                <Field
+                  label="Rollover Amount (Principal only)"
+                  value={formatCurrency(snapshot.principal)}
+                />
+                <Field
+                  label="Interest Payout (Funds-Out)"
+                  value={formatCurrency(snapshot.accrued_interest)}
+                />
+                <div className="sm:col-span-2">
+                  <p className="text-xs text-blue-600/80">
+                    Principal is reinvested. A linked Funds-Out transaction for the interest payout
+                    will be created automatically after the voucher is prepared.
+                  </p>
+                </div>
+              </>
+            ) : scenarioCode === 'INTEREST_ONLY' ? (
+              <>
+                <Field
+                  label="Principal (remains invested)"
+                  value={formatCurrency(snapshot.principal)}
+                />
+                <Field
+                  label="Interest Payout (Funds-Out)"
+                  value={formatCurrency(snapshot.accrued_interest)}
+                />
+                <div className="sm:col-span-2">
+                  <p className="text-xs text-blue-600/80">
+                    Principal investment stays active — it is NOT terminated.
+                    Only the accrued interest is paid out via a linked Funds-Out transaction
+                    created automatically after the voucher is prepared.
+                  </p>
+                </div>
+              </>
+            ) : scenarioCode === 'PARTIAL_PRINCIPAL' ? (
+              <PartialPrincipalIntermediateValues snapshot={snapshot} requestedPayout={requestedPayout} />
+            ) : (
+              <>
+                <Field
+                  label="Rollover Amount (Principal + Interest)"
+                  value={formatCurrency(
+                    String(parseFloat(snapshot.principal) + parseFloat(snapshot.accrued_interest)),
+                  )}
+                />
+                <Field
+                  label="No external payment"
+                  value="Both principal and interest are reinvested"
+                />
+              </>
+            )}
           </>
         )}
       </dl>
@@ -403,6 +558,14 @@ function FundsInVoucherContent({ voucher }: { voucher: NonNullable<TransactionWo
 // ─── FUNDS_OUT voucher content (Req 11.3) ─────────────────────────────────────
 
 function FundsOutVoucherContent({ voucher }: { voucher: NonNullable<TransactionWorkspace['voucher']> }) {
+  const snap = voucher.calculation_snapshot as Record<string, unknown> | null
+  const outputs = snap?.outputs as Record<string, string> | undefined
+  const inputs = snap?.inputs as Record<string, string> | undefined
+
+  const isPartialPreLiquidation =
+    (snap?.rule as string | undefined) === 'PRE_LIQUIDATION_20_PERCENT' &&
+    Boolean(inputs?.requested_payout && Number(inputs.requested_payout) > 0)
+
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
       {voucher.available_balance ? (
@@ -412,7 +575,14 @@ function FundsOutVoucherContent({ voucher }: { voucher: NonNullable<TransactionW
       )}
       <Field label="Interest" value={formatCurrency(voucher.interest)} />
       <Field label="WHT" value={formatCurrency(voucher.wht ?? '0')} />
-      <Field label="Charge" value={formatCurrency(voucher.charge ?? '0')} />
+      <Field label="Charge (20% of interest)" value={formatCurrency(voucher.charge ?? '0')} />
+      {isPartialPreLiquidation && (
+        <>
+          <Field label="Requested Payout" value={formatCurrency(inputs?.requested_payout ?? '0')} />
+          <Field label="Remaining Principal (= Principal − Payout)" value={formatCurrency(outputs?.remaining_principal ?? '—')} />
+          <Field label="Rebooked Principal (= Remaining − Charge)" value={formatCurrency(outputs?.rebooked_principal ?? '—')} />
+        </>
+      )}
       <div className="sm:col-span-2 flex items-center gap-2 rounded-md bg-muted/30 px-3 py-2">
         <span className="text-xs font-medium text-muted-foreground">Net Amount:</span>
         <span className="text-sm font-semibold text-foreground">{formatCurrency(voucher.net_amount)}</span>
@@ -434,25 +604,74 @@ function RolloverSlipContent({ voucher }: { voucher: NonNullable<TransactionWork
   const snap = voucher.calculation_snapshot as Record<string, unknown>
   const outputs = snap?.outputs as Record<string, string> | undefined
   const inputs = snap?.inputs as Record<string, string> | undefined
+
+  // Detect PRINCIPAL_ONLY scenario from the calculation snapshot rule
+  const isPrincipalOnly =
+    (snap?.rule as string | undefined) === 'ROLLOVER_PRINCIPAL_ONLY'
+
+  // Detect PARTIAL_PRINCIPAL scenario from the calculation snapshot rule
+  const isPartialPrincipal =
+    (snap?.rule as string | undefined) === 'ROLLOVER_PARTIAL_PRINCIPAL'
+
+  // Detect INTEREST_ONLY scenario from the calculation snapshot rule
+  const isInterestOnly =
+    (snap?.rule as string | undefined) === 'ROLLOVER_INTEREST_ONLY'
+
   return (
-    <dl className="grid gap-3 sm:grid-cols-2">
-      <Field label="Principal Amount" value={formatCurrency(voucher.principal)} />
-      <Field label="Interest Due" value={formatCurrency(voucher.interest)} />
-      <Field label="Effective Date" value={inputs?.effective_date ?? '—'} />
-      <Field label="New Tenor (days)" value={inputs?.new_tenor ?? '—'} />
-      <Field label="New Rate" value={inputs?.new_rate ? formatRate(inputs.new_rate) : '—'} />
-      <Field label="Rollover Amount" value={formatCurrency(outputs?.rollover_amount ?? voucher.net_amount)} />
-      <Field label="Rollover Maturity Date" value={inputs?.rollover_maturity_date ?? '—'} />
-      {outputs?.interest_paid && (
-        <Field label="Interest Payout" value={formatCurrency(outputs.interest_paid)} />
+    <div className="space-y-3">
+      <dl className="grid gap-3 sm:grid-cols-2">
+        <Field label="Principal Amount" value={formatCurrency(voucher.principal)} />
+        <Field label="Interest Due" value={formatCurrency(voucher.interest)} />
+        {isPartialPrincipal && inputs?.requested_payout && (
+          <Field label="Requested Payout" value={formatCurrency(inputs.requested_payout)} />
+        )}
+        {isPartialPrincipal && outputs?.remaining_principal && (
+          <Field label="Remaining Principal (Rolled)" value={formatCurrency(outputs.remaining_principal)} />
+        )}
+        <Field label="Effective Date" value={inputs?.effective_date ?? '—'} />
+        <Field label="New Tenor (days)" value={inputs?.new_tenor ?? '—'} />
+        <Field label="New Rate" value={inputs?.new_rate ? formatRate(inputs.new_rate) : '—'} />
+        <Field label="Rollover Amount (reinvested)" value={formatCurrency(outputs?.rollover_amount ?? voucher.net_amount)} />
+        <Field label="Rollover Maturity Date" value={inputs?.rollover_maturity_date ?? '—'} />
+        {outputs?.interest_paid && (
+          <Field label="Interest Payout (Funds-Out)" value={formatCurrency(outputs.interest_paid)} />
+        )}
+        {voucher.remarks && (
+          <div className="sm:col-span-2">
+            <dt className="text-xs font-medium text-muted-foreground">Remarks</dt>
+            <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">{voucher.remarks}</dd>
+          </div>
+        )}
+      </dl>
+      {isPrincipalOnly && (
+        <Alert>
+          <AlertTitle>Linked interest payout transaction</AlertTitle>
+          <AlertDescription>
+            A linked Funds-Out transaction was automatically created for the interest payout
+            of {formatCurrency(outputs?.interest_paid ?? voucher.interest)}. You can find it
+            in the transaction list referencing this rollover.
+          </AlertDescription>
+        </Alert>
       )}
-      {voucher.remarks && (
-        <div className="sm:col-span-2">
-          <dt className="text-xs font-medium text-muted-foreground">Remarks</dt>
-          <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">{voucher.remarks}</dd>
-        </div>
+      {isInterestOnly && (
+        <Alert>
+          <AlertTitle>Interest Only — principal stays invested</AlertTitle>
+          <AlertDescription>
+            The principal of {formatCurrency(voucher.principal)} remains active and was NOT terminated.
+            A linked Funds-Out transaction was automatically created for the interest payout
+            of {formatCurrency(outputs?.interest_paid ?? voucher.interest)}.
+          </AlertDescription>
+        </Alert>
       )}
-    </dl>
+      {isPartialPrincipal && (
+        <Alert>
+          <AlertTitle>Partial Principal Rollover</AlertTitle>
+          <AlertDescription>
+            Original principal: {formatCurrency(voucher.principal)} · Requested payout: {formatCurrency(inputs?.requested_payout ?? '0')} · Remaining principal rolled: {formatCurrency(outputs?.remaining_principal ?? '0')}.
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
   )
 }
 
@@ -509,6 +728,10 @@ interface VariantFormProps {
   setValue: ReturnType<typeof useForm<VoucherPreparationInput>>['setValue']
   errors: ReturnType<typeof useForm<VoucherPreparationInput>>['formState']['errors']
   snapshot: NonNullable<TransactionWorkspace['investmentVerification']>
+  /** Optional scenario code for scenario-specific UI hints */
+  scenarioCode?: string | null
+  /** Optional transaction type for type-specific UI hints */
+  transactionType?: string
 }
 
 function FundsInForm({ disabled, register, errors }: VariantFormProps) {
@@ -542,10 +765,76 @@ function FundsInForm({ disabled, register, errors }: VariantFormProps) {
   )
 }
 
-function FundsOutForm({ disabled, register, errors, snapshot }: VariantFormProps) {
+function FundsOutForm({ disabled, register, errors, snapshot, transactionType, scenarioCode, watch }: VariantFormProps) {
   const errs = errors as Record<string, { message?: string } | undefined>
+  const isPreLiquidation = transactionType === 'PRE_LIQUIDATION'
+  // Partial pre-liquidation: PRE_LIQUIDATION transaction with a requestedPayout value.
+  // The scenarioCode is not set on PRE_LIQUIDATION (unlike ROLLOVER); instead the user
+  // enters a requestedPayout amount which triggers the partial path server-side (Req 19.2).
+  const watchedPayout = (watch?.('requestedPayout' as never) as unknown) as string | undefined
+  const isPartialPreLiquidation = isPreLiquidation && Boolean(watchedPayout && Number(watchedPayout) > 0)
+
+  // Live intermediate values for partial pre-liquidation display (Req 19.2)
+  const principal = parseFloat(snapshot.principal)
+  const accruedInterest = parseFloat(snapshot.accrued_interest)
+  const parsedPayout = isPartialPreLiquidation ? parseFloat(watchedPayout!) : NaN
+  const charge = isFinite(accruedInterest) ? Math.round(accruedInterest * 0.2 * 1e4) / 1e4 : 0
+  const netInterest = isFinite(accruedInterest) ? Math.round((accruedInterest - charge) * 1e4) / 1e4 : 0
+  const remainingPrincipal =
+    isPartialPreLiquidation && isFinite(parsedPayout) && parsedPayout > 0 && parsedPayout < principal
+      ? Math.round((principal - parsedPayout) * 1e4) / 1e4
+      : null
+  const rebookedPrincipal =
+    remainingPrincipal !== null
+      ? Math.round((remainingPrincipal - charge) * 1e4) / 1e4
+      : null
+
   return (
     <div className="space-y-4">
+      {isPreLiquidation && !isPartialPreLiquidation && (
+        <Alert>
+          <AlertTitle>Pre-Liquidation — Full (20% charge)</AlertTitle>
+          <AlertDescription>
+            The 20% charge on accrued interest has been pre-filled below. Net amount = principal +
+            (accrued interest − charge). Confirm these values before preparing the voucher.
+            For a partial pre-liquidation, enter a requested payout amount below.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isPreLiquidation && isPartialPreLiquidation && (
+        <Alert>
+          <AlertTitle>Partial Pre-Liquidation — Intermediate Values</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span className="block">
+              Requested payout: <strong>{formatCurrency(String(parsedPayout))}</strong>
+            </span>
+            <span className="block">
+              Remaining principal (= principal − payout):{' '}
+              <strong>
+                {remainingPrincipal !== null
+                  ? formatCurrency(String(remainingPrincipal))
+                  : 'Enter a valid payout amount'}
+              </strong>
+            </span>
+            <span className="block">
+              20% charge on accrued interest:{' '}
+              <strong>{formatCurrency(String(charge))}</strong>
+            </span>
+            <span className="block">
+              Rebooked principal (= remaining − charge):{' '}
+              <strong>
+                {rebookedPrincipal !== null
+                  ? formatCurrency(String(rebookedPrincipal))
+                  : '—'}
+              </strong>
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              Authoritative values are computed server-side via PostgreSQL NUMERIC arithmetic.
+              These previews are estimates only. Confirm before preparing the voucher.
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField id="fo-principal" label="Principal (₦)" hint={`Snapshot: ${formatCurrency(snapshot.principal)}`} error={errs.principal?.message}>
           <Input id="fo-principal" type="text" inputMode="decimal" defaultValue={snapshot.principal} disabled={disabled} {...register('principal' as never)} className="text-sm" />
@@ -556,9 +845,28 @@ function FundsOutForm({ disabled, register, errors, snapshot }: VariantFormProps
         <FormField id="fo-wht" label="WHT (₦)" hint="Defaults to 0 per SOP" error={errs.wht?.message}>
           <Input id="fo-wht" type="text" inputMode="decimal" defaultValue="0" disabled={disabled} {...register('wht' as never)} className="text-sm" />
         </FormField>
-        <FormField id="fo-charge" label="Charge (₦)" hint="Pre-liquidation or transfer charge" error={errs.charge?.message}>
+        <FormField id="fo-charge" label="Charge (₦)" hint={isPreLiquidation ? '20% of accrued interest (PRE_LIQUIDATION_20_PERCENT rule)' : 'Pre-liquidation or transfer charge'} error={errs.charge?.message}>
           <Input id="fo-charge" type="text" inputMode="decimal" defaultValue="0" disabled={disabled} {...register('charge' as never)} className="text-sm" />
         </FormField>
+        {isPreLiquidation && (
+          <FormField
+            id="fo-requested-payout"
+            label="Requested Payout (₦)"
+            required={false}
+            hint="Leave blank for full pre-liquidation; enter amount for partial pre-liquidation (Req 19.2)"
+            error={errs.requestedPayout?.message}
+          >
+            <Input
+              id="fo-requested-payout"
+              type="text"
+              inputMode="decimal"
+              placeholder="e.g. 2000000.00 (optional)"
+              disabled={disabled}
+              {...register('requestedPayout' as never)}
+              className="text-sm"
+            />
+          </FormField>
+        )}
         <FormField id="fo-net-amount" label="Net Amount (₦)" hint="Server will validate against snapshot" error={errs.netAmount?.message}>
           <Input id="fo-net-amount" type="text" inputMode="decimal" placeholder="Computed net amount" disabled={disabled} {...register('netAmount' as never)} className="text-sm" />
         </FormField>
@@ -573,10 +881,44 @@ function FundsOutForm({ disabled, register, errors, snapshot }: VariantFormProps
   )
 }
 
-function RolloverSlipForm({ disabled, register, errors, snapshot }: VariantFormProps) {
+function RolloverSlipForm({ disabled, register, errors, snapshot, scenarioCode }: VariantFormProps) {
   const errs = errors as Record<string, { message?: string } | undefined>
+  const isPrincipalOnly = scenarioCode === 'PRINCIPAL_ONLY'
+  const isPartialPrincipal = scenarioCode === 'PARTIAL_PRINCIPAL'
+  const isInterestOnly = scenarioCode === 'INTEREST_ONLY'
   return (
     <div className="space-y-4">
+      {isPrincipalOnly && (
+        <Alert>
+          <AlertTitle>Principal Only Rollover</AlertTitle>
+          <AlertDescription>
+            The principal will be reinvested. The interest due ({formatCurrency(snapshot.accrued_interest)}) will be
+            paid out via a linked Funds-Out transaction created automatically after voucher preparation. Confirm
+            the interest payout amount below.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isInterestOnly && (
+        <Alert>
+          <AlertTitle>Interest Only Rollover</AlertTitle>
+          <AlertDescription>
+            The principal investment ({formatCurrency(snapshot.principal)}) remains active and is NOT terminated.
+            Only the accrued interest ({formatCurrency(snapshot.accrued_interest)}) will be paid out via a linked
+            Funds-Out transaction created automatically after voucher preparation. Confirm the interest payout
+            amount below.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isPartialPrincipal && (
+        <Alert>
+          <AlertTitle>Partial Principal Rollover</AlertTitle>
+          <AlertDescription>
+            A portion of the principal will be paid out as requested. The remaining principal
+            (original principal − requested payout) will be rolled over and reinvested.
+            Confirm the requested payout amount below before preparing the voucher.
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField id="rs-principal" label="Principal Amount (₦)" hint={`Snapshot: ${formatCurrency(snapshot.principal)}`} error={errs.principalAmount?.message}>
           <Input id="rs-principal" type="text" inputMode="decimal" defaultValue={snapshot.principal} disabled={disabled} {...register('principalAmount' as never)} className="text-sm" />
@@ -584,6 +926,16 @@ function RolloverSlipForm({ disabled, register, errors, snapshot }: VariantFormP
         <FormField id="rs-interest-due" label="Interest Due (₦)" hint={`Snapshot: ${formatCurrency(snapshot.accrued_interest)}`} error={errs.interestDue?.message}>
           <Input id="rs-interest-due" type="text" inputMode="decimal" defaultValue={snapshot.accrued_interest} disabled={disabled} {...register('interestDue' as never)} className="text-sm" />
         </FormField>
+        {isPartialPrincipal && (
+          <FormField
+            id="rs-requested-payout"
+            label="Requested Payout (₦)"
+            hint="Amount to be paid out from principal"
+            error={errs.requestedPayout?.message}
+          >
+            <Input id="rs-requested-payout" type="text" inputMode="decimal" placeholder="e.g. 2000000.00" disabled={disabled} {...register('requestedPayout' as never)} className="text-sm" />
+          </FormField>
+        )}
         <FormField id="rs-effective-date" label="Effective Date" error={errs.effectiveDate?.message}>
           <Input id="rs-effective-date" type="date" disabled={disabled} {...register('effectiveDate' as never)} className="text-sm" />
         </FormField>
@@ -593,14 +945,39 @@ function RolloverSlipForm({ disabled, register, errors, snapshot }: VariantFormP
         <FormField id="rs-new-rate" label="New Rate (%)" hint={`Current: ${formatRate(snapshot.interest_rate)}`} error={errs.newRate?.message}>
           <Input id="rs-new-rate" type="text" inputMode="decimal" placeholder="e.g. 19.5" disabled={disabled} {...register('newRate' as never)} className="text-sm" />
         </FormField>
-        <FormField id="rs-rollover-amount" label="Rollover Amount (₦)" hint="Computed server-side; enter for confirmation" error={errs.rolloverAmount?.message}>
-          <Input id="rs-rollover-amount" type="text" inputMode="decimal" placeholder="e.g. 11500000.00" disabled={disabled} {...register('rolloverAmount' as never)} className="text-sm" />
+        <FormField
+          id="rs-rollover-amount"
+          label="Rollover Amount (₦)"
+          hint={
+            isPrincipalOnly
+              ? 'Principal only — interest is paid out separately'
+              : isInterestOnly
+              ? 'Principal stays invested — interest paid out separately'
+              : isPartialPrincipal
+              ? 'Remaining principal after payout — computed server-side'
+              : 'Computed server-side; enter for confirmation'
+          }
+          error={errs.rolloverAmount?.message}
+        >
+          <Input id="rs-rollover-amount" type="text" inputMode="decimal" placeholder="e.g. 10000000.00" disabled={disabled} {...register('rolloverAmount' as never)} className="text-sm" />
         </FormField>
         <FormField id="rs-maturity-date" label="Rollover Maturity Date" error={errs.rolloverMaturityDate?.message}>
           <Input id="rs-maturity-date" type="date" disabled={disabled} {...register('rolloverMaturityDate' as never)} className="text-sm" />
         </FormField>
-        <FormField id="rs-interest-payout" label="Interest Payout (₦)" required={false} hint="For PRINCIPAL_ONLY / INTEREST_ONLY rollovers" error={errs.interestPayout?.message}>
-          <Input id="rs-interest-payout" type="text" inputMode="decimal" placeholder="Optional" disabled={disabled} {...register('interestPayout' as never)} className="text-sm" />
+        <FormField
+          id="rs-interest-payout"
+          label="Interest Payout (₦)"
+          required={isPrincipalOnly || isInterestOnly}
+          hint={
+            isPrincipalOnly
+              ? 'Required — equals the accrued interest from the snapshot'
+              : isInterestOnly
+              ? 'Required — equals the accrued interest paid out via linked Funds-Out'
+              : 'For PRINCIPAL_ONLY / INTEREST_ONLY rollovers'
+          }
+          error={errs.interestPayout?.message}
+        >
+          <Input id="rs-interest-payout" type="text" inputMode="decimal" placeholder={isPrincipalOnly || isInterestOnly ? snapshot.accrued_interest : 'Optional'} disabled={disabled} {...register('interestPayout' as never)} className="text-sm" />
         </FormField>
       </div>
       <FormField id="rs-remarks" label="Remarks" required={false} error={errs.remarks?.message}>
@@ -640,6 +1017,8 @@ function TransferSlipForm({ disabled, register, errors }: VariantFormProps) {
 function buildDefaults(
   voucherType: VoucherType,
   snapshot: TransactionWorkspace['investmentVerification'],
+  scenarioCode?: string | null,
+  transactionType?: string,
 ): Partial<VoucherPreparationInput> {
   const todayStr = today()
 
@@ -657,29 +1036,67 @@ function buildDefaults(
   }
 
   if (voucherType === 'FUNDS_OUT') {
+    // For PRE_LIQUIDATION, pre-fill the 20% charge and net amount from the snapshot (Req 19.3, 19.4)
+    const isPreLiquidation = transactionType === 'PRE_LIQUIDATION'
+    const accruedInterest = parseFloat(snapshot?.accrued_interest ?? '0')
+    const preLiqCharge = isPreLiquidation && isFinite(accruedInterest)
+      ? (Math.round(accruedInterest * 0.20 * 1e4) / 1e4).toString()
+      : '0'
+    const preLiqNetInterest = isPreLiquidation && isFinite(accruedInterest)
+      ? (Math.round((accruedInterest - parseFloat(preLiqCharge)) * 1e4) / 1e4).toString()
+      : ''
+    const principal = parseFloat(snapshot?.principal ?? '0')
+    // For full PRE_LIQUIDATION: net amount = principal + net_interest (interest after charge deducted)
+    const preLiqNetAmount = isPreLiquidation && isFinite(principal) && preLiqNetInterest
+      ? (Math.round((principal + parseFloat(preLiqNetInterest)) * 1e4) / 1e4).toString()
+      : ''
+
     return {
       voucherType: 'FUNDS_OUT',
       principal: snapshot?.principal ?? '',
       interest: snapshot?.accrued_interest ?? '',
       wht: '0',
-      charge: '0',
-      netAmount: '',
+      charge: isPreLiquidation ? preLiqCharge : '0',
+      netAmount: isPreLiquidation ? preLiqNetAmount : '',
+      // requestedPayout starts empty; the Treasury Officer fills it if partial
+      requestedPayout: undefined,
       transferDate: todayStr,
       remarks: '',
     } satisfies Partial<FundsOutVoucherInput>
   }
 
   if (voucherType === 'ROLLOVER_SLIP') {
+    // For PRINCIPAL_ONLY:    rolloverAmount = principal; interestPayout pre-filled from snapshot
+    // For INTEREST_ONLY:     rolloverAmount = principal (stays invested); interestPayout pre-filled
+    // For PARTIAL_PRINCIPAL: rolloverAmount = remaining_principal (computed server-side)
+    const isPrincipalOnly = scenarioCode === 'PRINCIPAL_ONLY'
+    const isPartialPrincipal = scenarioCode === 'PARTIAL_PRINCIPAL'
+    const isInterestOnly = scenarioCode === 'INTEREST_ONLY'
+
+    let rolloverType: 'P_AND_I' | 'PRINCIPAL_ONLY' | 'PARTIAL_PRINCIPAL' | 'INTEREST_ONLY' = 'P_AND_I'
+    if (isPrincipalOnly) rolloverType = 'PRINCIPAL_ONLY'
+    else if (isPartialPrincipal) rolloverType = 'PARTIAL_PRINCIPAL'
+    else if (isInterestOnly) rolloverType = 'INTEREST_ONLY'
+
     return {
       voucherType: 'ROLLOVER_SLIP',
-      rolloverType: 'P_AND_I',
+      rolloverType,
       principalAmount: snapshot?.principal ?? '',
       interestDue: snapshot?.accrued_interest ?? '',
       effectiveDate: snapshot?.effective_date ?? todayStr,
       newTenor: 90,
       newRate: snapshot?.interest_rate ?? '',
-      rolloverAmount: '',
+      // For PRINCIPAL_ONLY / INTEREST_ONLY: rolloverAmount = principal (interest is paid out separately)
+      // For PARTIAL_PRINCIPAL: rolloverAmount = remaining_principal (computed server-side after payout entry)
+      rolloverAmount: (isPrincipalOnly || isInterestOnly) ? (snapshot?.principal ?? '') : '',
       rolloverMaturityDate: '',
+      // Pre-fill interestPayout so the Treasury Officer can confirm it
+      // Req 17.3 (PRINCIPAL_ONLY) / Req 17.5 (INTEREST_ONLY)
+      interestPayout: (isPrincipalOnly || isInterestOnly)
+        ? (snapshot?.accrued_interest ?? '')
+        : undefined,
+      // requestedPayout is entered by the Treasury Officer for PARTIAL_PRINCIPAL
+      requestedPayout: isPartialPrincipal ? '' : undefined,
       remarks: '',
     } satisfies Partial<RolloverSlipVoucherInput>
   }
@@ -730,7 +1147,7 @@ export default function Step5VoucherGeneration({
 
   const requiresPaymentInstruction = REQUIRES_PAYMENT_INSTRUCTION.has(transactionType)
 
-  const defaults = buildDefaults(resolvedVoucherType, investmentVerification)
+  const defaults = buildDefaults(resolvedVoucherType, investmentVerification, scenarioCode, transactionType)
 
   const {
     register,
@@ -739,7 +1156,8 @@ export default function Step5VoucherGeneration({
     setValue,
     formState: { errors },
   } = useForm<VoucherPreparationInput>({
-    resolver: zodResolver(VoucherPreparationSchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(VoucherPreparationSchema) as any,
     defaultValues: defaults as VoucherPreparationInput,
   })
 
@@ -765,6 +1183,9 @@ export default function Step5VoucherGeneration({
   }
 
   const disabled = !canAct || submitting
+
+  // Watch requestedPayout for PARTIAL_PRINCIPAL live preview
+  const watchedRequestedPayout = (watch('requestedPayout' as never) as unknown) as string | undefined
 
   // ── Read-only mode — voucher already exists ─────────────────────────────────
 
@@ -794,6 +1215,8 @@ export default function Step5VoucherGeneration({
     watch,
     setValue,
     errors,
+    scenarioCode,
+    transactionType,
     snapshot: investmentVerification ?? {
       id: '', verified_by: '', source_system: 'EAZYBANKZ',
       principal: '0', accrued_interest: '0', interest_rate: '0',
@@ -848,6 +1271,8 @@ export default function Step5VoucherGeneration({
         <CalculationPreview
           snapshot={investmentVerification}
           transactionType={transactionType}
+          scenarioCode={scenarioCode}
+          requestedPayout={watchedRequestedPayout}
         />
       )}
 
@@ -859,7 +1284,7 @@ export default function Step5VoucherGeneration({
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
+      <form onSubmit={handleSubmit(onSubmit as Parameters<typeof handleSubmit>[0])} className="space-y-5" noValidate>
         {/* Variant-specific form fields */}
         {resolvedVoucherType === 'FUNDS_IN' && <FundsInForm {...formProps} />}
         {resolvedVoucherType === 'FUNDS_OUT' && <FundsOutForm {...formProps} />}

@@ -84,46 +84,116 @@ export async function executeTransactionAction(
 
   const result = data as { execution_id: string; new_status?: string; idempotent?: boolean }
 
-  // 6. Rollover post-execution: book the new investment in the mirror (Req 17.7)
-  //    Only run for SUCCESS executions to avoid booking a failed investment.
+  // 6. Post-execution Eazybankz adapter calls (Req 18.3, 17.7)
+  //    Only run for SUCCESS executions to avoid side-effects on failed/partial runs.
   if (input.executionStatus === 'SUCCESS') {
-    // Load the transaction to check its type
+    // Load the transaction to check its type and related data
     const { data: txData } = await supabase
       .from('treasury_transactions')
-      .select('transaction_type, customer_id')
+      .select('transaction_type, customer_id, investment_id')
       .eq('id', transactionId)
       .single()
 
-    if (txData?.transaction_type === 'ROLLOVER') {
-      // Load the rollover_details row persisted during voucher preparation
-      const { data: rolloverDetails } = await supabase
-        .from('rollover_details')
-        .select('*')
-        .eq('transaction_id', transactionId)
-        .single()
+    if (txData) {
+      try {
+        const { eazybankzAdapter } = await import('@/lib/services/eazybankz')
 
-      if (rolloverDetails) {
-        try {
-          const { eazybankzAdapter } = await import('@/lib/services/eazybankz')
+        switch (txData.transaction_type) {
 
-          await eazybankzAdapter.createInvestment({
-            customerId: txData.customer_id,
-            principal: String(rolloverDetails.new_rollover_amount),
-            interestRate: String(rolloverDetails.new_rate),
-            tenorDays: rolloverDetails.new_tenor,
-            effectiveDate: rolloverDetails.new_effective_date,
-            maturityDate: rolloverDetails.new_maturity_date,
-            productType: 'FIXED_DEPOSIT',
-            sourceTransactionId: transactionId,
-          })
-        } catch (adapterError) {
-          // Log but don't fail the execution — the investment booking is
-          // best-effort in Phase 1–5; Phase 6 will add retry/compensation logic.
-          console.error(
-            '[executeTransactionAction] createInvestment failed:',
-            adapterError instanceof Error ? adapterError.message : adapterError,
-          )
+          // ── ROLLOVER: book the new rolled investment (Req 17.7) ───────────
+          case 'ROLLOVER': {
+            const { data: rolloverDetails } = await supabase
+              .from('rollover_details')
+              .select('*')
+              .eq('transaction_id', transactionId)
+              .single()
+
+            if (rolloverDetails) {
+              await eazybankzAdapter.createInvestment({
+                customerId: txData.customer_id,
+                principal: String(rolloverDetails.new_rollover_amount),
+                interestRate: String(rolloverDetails.new_rate),
+                tenorDays: rolloverDetails.new_tenor,
+                effectiveDate: rolloverDetails.new_effective_date,
+                maturityDate: rolloverDetails.new_maturity_date,
+                productType: 'FIXED_DEPOSIT',
+                sourceTransactionId: transactionId,
+              })
+            }
+            break
+          }
+
+          // ── MATURITY_TERMINATION: mark investment as TERMINATED (Req 18.3) ─
+          case 'MATURITY_TERMINATION': {
+            if (txData.investment_id) {
+              // Resolve the external_reference for the investment
+              const { data: investment } = await supabase
+                .from('investments')
+                .select('external_reference')
+                .eq('id', txData.investment_id)
+                .maybeSingle()
+
+              if (investment?.external_reference) {
+                await eazybankzAdapter.updateInvestment(investment.external_reference, {
+                  status: 'TERMINATED',
+                  sourceTransactionId: transactionId,
+                })
+              }
+            }
+            break
+          }
+
+          // ── PRE_LIQUIDATION (partial): rebook remaining principal (Req 19.5) ─
+          //    For full pre-liquidation the investment is simply terminated.
+          //    For partial pre-liquidation the remaining principal is rebooked:
+          //    rebooked_principal = remaining_principal − charge.
+          //    The pre_liquidation_details row holds both values (Req 19.3).
+          case 'PRE_LIQUIDATION': {
+            if (txData.investment_id) {
+              const { data: investment } = await supabase
+                .from('investments')
+                .select('external_reference')
+                .eq('id', txData.investment_id)
+                .maybeSingle()
+
+              if (investment?.external_reference) {
+                // Load pre_liquidation_details to check if this is a partial pre-liquidation
+                const { data: preLiqDetails } = await supabase
+                  .from('pre_liquidation_details')
+                  .select('requested_payout, rebooked_principal, remaining_principal')
+                  .eq('transaction_id', transactionId)
+                  .maybeSingle()
+
+                if (preLiqDetails?.rebooked_principal && preLiqDetails?.requested_payout) {
+                  // Partial pre-liquidation: rebook the remaining investment (Req 19.5)
+                  await eazybankzAdapter.updateInvestment(investment.external_reference, {
+                    outstandingBalance: String(preLiqDetails.rebooked_principal),
+                    availableAmount: String(preLiqDetails.rebooked_principal),
+                    sourceTransactionId: transactionId,
+                  })
+                } else {
+                  // Full pre-liquidation: terminate the investment entirely
+                  await eazybankzAdapter.updateInvestment(investment.external_reference, {
+                    status: 'TERMINATED',
+                    sourceTransactionId: transactionId,
+                  })
+                }
+              }
+            }
+            break
+          }
+
+          default:
+            // Other transaction types are handled in later phases (4.5).
+            break
         }
+      } catch (adapterError) {
+        // Log but don't fail the execution — the Eazybankz call is best-effort
+        // in Phase 1–5; Phase 6 adds retry/compensation logic (Req 30.5).
+        console.error(
+          '[executeTransactionAction] Eazybankz adapter call failed:',
+          adapterError instanceof Error ? adapterError.message : adapterError,
+        )
       }
     }
   }
