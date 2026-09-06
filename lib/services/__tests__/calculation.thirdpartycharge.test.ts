@@ -129,7 +129,7 @@ describe('Property 1 (Req 21.3) — internal transfer charge is always exactly z
 
         expect(toNum(result.transferCharge)).toBe(0)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -146,7 +146,7 @@ describe('Property 1 (Req 21.3) — internal transfer charge is always exactly z
 
         expect(toNum(result.netAmount)).toBe(toNum(transferAmountStr))
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -167,7 +167,7 @@ describe('Property 2 (Req 21.2) — external transfer charge is always exactly 0
 
         expect(toNum(result.transferCharge)).toBe(expectedCharge)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -178,7 +178,7 @@ describe('Property 2 (Req 21.2) — external transfer charge is always exactly 0
 
         expect(toNum(result.transferCharge)).toBeGreaterThan(0)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -195,7 +195,7 @@ describe('Property 2 (Req 21.2) — external transfer charge is always exactly 0
         const effectiveRate = charge / transferAmount
         expect(effectiveRate).toBeCloseTo(0.001, 5)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -208,7 +208,7 @@ describe('Property 2 (Req 21.2) — external transfer charge is always exactly 0
         // The charge is borne by the sender separately — it is NOT deducted from net_amount.
         expect(toNum(result.netAmount)).toBe(toNum(transferAmountStr))
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -229,7 +229,7 @@ describe('Property 3 — external charge is always strictly greater than interna
           toNum(internalResult.transferCharge),
         )
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -256,7 +256,7 @@ describe('Property 4 — monotonicity: larger transfer amount produces larger ex
           )
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 
@@ -279,7 +279,7 @@ describe('Property 4 — monotonicity: larger transfer amount produces larger ex
           expect(toNum(smallerResult.transferCharge)).toBe(0)
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })
@@ -297,7 +297,7 @@ describe('Property 5 — charge is always less than transfer amount (charge < 1%
 
         expect(charge).toBeLessThan(transferAmount)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })

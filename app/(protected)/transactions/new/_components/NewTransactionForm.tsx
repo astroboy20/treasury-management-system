@@ -64,6 +64,12 @@ const SCENARIO_CODE_OPTIONS = [
   { value: 'INTEREST_ONLY',    label: 'Interest Only' },
 ] as const
 
+const ANNIVERSARY_SCENARIO_OPTIONS = [
+  { value: 'ANNIVERSARY_30', label: '30-Day (ANNIVERSARY_30)' },
+  { value: 'ANNIVERSARY_60', label: '60-Day (ANNIVERSARY_60)' },
+  { value: 'ANNIVERSARY_90', label: '90-Day (ANNIVERSARY_90)' },
+] as const
+
 const ACCOUNT_TYPE_OPTIONS = [
   { value: 'SAVINGS',          label: 'Savings' },
   { value: 'PERSONAL',         label: 'Personal' },
@@ -74,6 +80,9 @@ const ACCOUNT_TYPE_OPTIONS = [
 
 /** Transaction types that require a rollover scenario code */
 const ROLLOVER_TYPES: TransactionType[] = ['ROLLOVER']
+
+/** Transaction types that require an anniversary scenario code */
+const ANNIVERSARY_TYPES: TransactionType[] = ['ANNIVERSARY_PAYMENT']
 
 /** Transaction types that require external payment beneficiary fields (Req 7.7) */
 const EXTERNAL_PAYMENT_TYPES: TransactionType[] = ['THIRD_PARTY_PAYMENT']
@@ -208,6 +217,9 @@ export default function NewTransactionForm({ customers }: Props) {
   const [investments, setInvestments] = useState<InvestmentOption[]>([])
   const [loadingInvestments, setLoadingInvestments] = useState(false)
 
+  // Internal/External toggle for THIRD_PARTY_PAYMENT (Req 21.1, 21.3)
+  const [isInternalTransfer, setIsInternalTransfer] = useState(false)
+
   const {
     register,
     handleSubmit,
@@ -232,6 +244,7 @@ export default function NewTransactionForm({ customers }: Props) {
   const requestedPayoutValue = watch('requestedPayout')
   const requestedAmountValue = watch('requestedAmount')
   const isRollover           = ROLLOVER_TYPES.includes(selectedType)
+  const isAnniversary        = ANNIVERSARY_TYPES.includes(selectedType)
   const isExternalPayment    = EXTERNAL_PAYMENT_TYPES.includes(selectedType)
   const isPartialPrincipal   = isRollover && selectedScenarioCode === 'PARTIAL_PRINCIPAL'
 
@@ -258,15 +271,16 @@ export default function NewTransactionForm({ customers }: Props) {
   useEffect(() => {
     if (!isExternalPayment) {
       setValue('paymentInstruction', undefined)
+      setIsInternalTransfer(false)
     }
   }, [isExternalPayment, setValue])
 
   // Clear scenario code when type no longer requires it
   useEffect(() => {
-    if (!isRollover) {
+    if (!isRollover && !isAnniversary) {
       setValue('scenarioCode', undefined)
     }
-  }, [isRollover, setValue])
+  }, [isRollover, isAnniversary, setValue])
 
   // Clear requestedPayout when not a PARTIAL_PRINCIPAL rollover
   useEffect(() => {
@@ -392,10 +406,10 @@ export default function NewTransactionForm({ customers }: Props) {
             <FieldError message={errors.transactionType?.message} />
           </div>
 
-          {/* Scenario code — visible only for ROLLOVER */}
-          <div className={isRollover ? 'block' : 'hidden'} aria-hidden={!isRollover}>
-            <Label htmlFor="scenarioCode" required={isRollover}>
-              Rollover Scenario
+          {/* Scenario code — visible only for ROLLOVER or ANNIVERSARY_PAYMENT */}
+          <div className={isRollover || isAnniversary ? 'block' : 'hidden'} aria-hidden={!isRollover && !isAnniversary}>
+            <Label htmlFor="scenarioCode" required={isRollover || isAnniversary}>
+              {isAnniversary ? 'Anniversary Frequency' : 'Rollover Scenario'}
             </Label>
             <div className="mt-2">
               <select
@@ -405,12 +419,19 @@ export default function NewTransactionForm({ customers }: Props) {
                   errors.scenarioCode ? 'border-destructive' : 'border-input'
                 }`}
               >
-                <option value="">Select scenario…</option>
-                {SCENARIO_CODE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
+                <option value="">{isAnniversary ? 'Select frequency…' : 'Select scenario…'}</option>
+                {isAnniversary
+                  ? ANNIVERSARY_SCENARIO_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))
+                  : SCENARIO_CODE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))
+                }
               </select>
             </div>
             <FieldError message={errors.scenarioCode?.message} />
@@ -553,101 +574,178 @@ export default function NewTransactionForm({ customers }: Props) {
       {isExternalPayment && (
         <fieldset className="rounded-xl border border-border bg-background p-6">
           <legend className="px-1 text-sm font-semibold text-foreground">
-            External Payment Beneficiary
+            {isInternalTransfer ? 'Internal Transfer — Intra-company transfer (no charge)' : 'External Payment Beneficiary'}
           </legend>
           <p className="mt-1 text-sm text-muted-foreground">
-            Required for third-party external payments. All fields below are mandatory.
+            {isInternalTransfer
+              ? 'Internal transfer — Transfer Charge: ₦0 (no charge for intra-company transfers)'
+              : 'Required for third-party external payments. All fields below are mandatory.'}
           </p>
 
+          {/* Internal / External toggle (Req 21.1) */}
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!isInternalTransfer}
+              onClick={() => {
+                setIsInternalTransfer(false)
+                setValue('paymentInstruction.isInternal', false, { shouldValidate: true })
+                // Clear the internal-only field if switching back to external
+                setValue('paymentInstruction.accountNumber', '', { shouldValidate: false })
+              }}
+              className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                !isInternalTransfer
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-input bg-background text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              External Transfer
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={isInternalTransfer}
+              onClick={() => {
+                setIsInternalTransfer(true)
+                setValue('paymentInstruction.isInternal', true, { shouldValidate: true })
+                // Clear external-only fields when switching to internal
+                setValue('paymentInstruction.beneficiaryName', '', { shouldValidate: false })
+                setValue('paymentInstruction.bankName', '', { shouldValidate: false })
+                setValue('paymentInstruction.accountType', undefined, { shouldValidate: false })
+              }}
+              className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                isInternalTransfer
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-input bg-background text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              Internal Transfer
+            </button>
+          </div>
+
           <div className="mt-5 grid gap-5 sm:grid-cols-2">
-            {/* Beneficiary name */}
-            <div>
-              <Label htmlFor="paymentInstruction.beneficiaryName" required>
-                Beneficiary Name
-              </Label>
-              <div className="mt-2">
+            {isInternalTransfer ? (
+              /* Internal: only account number required (Req 21.1, 21.3) */
+              <>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="paymentInstruction.accountNumber" required>
+                    Internal Account Number
+                  </Label>
+                  <div className="mt-2">
+                    <input
+                      id="paymentInstruction.accountNumber"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="Internal account number"
+                      {...register('paymentInstruction.accountNumber')}
+                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                        errors.paymentInstruction?.accountNumber ? 'border-destructive' : 'border-input'
+                      }`}
+                    />
+                  </div>
+                  <FieldError message={errors.paymentInstruction?.accountNumber?.message} />
+                </div>
+                {/* Hidden field — isInternal = true */}
                 <input
-                  id="paymentInstruction.beneficiaryName"
-                  type="text"
-                  placeholder="Full legal name"
-                  {...register('paymentInstruction.beneficiaryName')}
-                  className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                    errors.paymentInstruction?.beneficiaryName ? 'border-destructive' : 'border-input'
-                  }`}
+                  type="hidden"
+                  {...register('paymentInstruction.isInternal')}
+                  value="true"
                 />
-              </div>
-              <FieldError message={errors.paymentInstruction?.beneficiaryName?.message} />
-            </div>
+              </>
+            ) : (
+              /* External: full 6 fields required (Req 7.7, 36.1) */
+              <>
+                {/* Beneficiary name */}
+                <div>
+                  <Label htmlFor="paymentInstruction.beneficiaryName" required>
+                    Beneficiary Name
+                  </Label>
+                  <div className="mt-2">
+                    <input
+                      id="paymentInstruction.beneficiaryName"
+                      type="text"
+                      placeholder="Full legal name"
+                      {...register('paymentInstruction.beneficiaryName')}
+                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                        errors.paymentInstruction?.beneficiaryName ? 'border-destructive' : 'border-input'
+                      }`}
+                    />
+                  </div>
+                  <FieldError message={errors.paymentInstruction?.beneficiaryName?.message} />
+                </div>
 
-            {/* Bank name */}
-            <div>
-              <Label htmlFor="paymentInstruction.bankName" required>
-                Bank Name
-              </Label>
-              <div className="mt-2">
+                {/* Bank name */}
+                <div>
+                  <Label htmlFor="paymentInstruction.bankName" required>
+                    Bank Name
+                  </Label>
+                  <div className="mt-2">
+                    <input
+                      id="paymentInstruction.bankName"
+                      type="text"
+                      placeholder="e.g. First Bank"
+                      {...register('paymentInstruction.bankName')}
+                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                        errors.paymentInstruction?.bankName ? 'border-destructive' : 'border-input'
+                      }`}
+                    />
+                  </div>
+                  <FieldError message={errors.paymentInstruction?.bankName?.message} />
+                </div>
+
+                {/* Account number */}
+                <div>
+                  <Label htmlFor="paymentInstruction.accountNumber" required>
+                    Account Number
+                  </Label>
+                  <div className="mt-2">
+                    <input
+                      id="paymentInstruction.accountNumber"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="10-digit NUBAN"
+                      {...register('paymentInstruction.accountNumber')}
+                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                        errors.paymentInstruction?.accountNumber ? 'border-destructive' : 'border-input'
+                      }`}
+                    />
+                  </div>
+                  <FieldError message={errors.paymentInstruction?.accountNumber?.message} />
+                </div>
+
+                {/* Account type */}
+                <div>
+                  <Label htmlFor="paymentInstruction.accountType" required>
+                    Account Type
+                  </Label>
+                  <div className="mt-2">
+                    <select
+                      id="paymentInstruction.accountType"
+                      {...register('paymentInstruction.accountType')}
+                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                        errors.paymentInstruction?.accountType ? 'border-destructive' : 'border-input'
+                      }`}
+                    >
+                      <option value="">Select account type…</option>
+                      {ACCOUNT_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <FieldError message={errors.paymentInstruction?.accountType?.message} />
+                </div>
+
+                {/* Hidden — is_internal = false for external THIRD_PARTY_PAYMENT */}
                 <input
-                  id="paymentInstruction.bankName"
-                  type="text"
-                  placeholder="e.g. First Bank"
-                  {...register('paymentInstruction.bankName')}
-                  className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                    errors.paymentInstruction?.bankName ? 'border-destructive' : 'border-input'
-                  }`}
+                  type="hidden"
+                  {...register('paymentInstruction.isInternal')}
+                  value="false"
                 />
-              </div>
-              <FieldError message={errors.paymentInstruction?.bankName?.message} />
-            </div>
-
-            {/* Account number */}
-            <div>
-              <Label htmlFor="paymentInstruction.accountNumber" required>
-                Account Number
-              </Label>
-              <div className="mt-2">
-                <input
-                  id="paymentInstruction.accountNumber"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="10-digit NUBAN"
-                  {...register('paymentInstruction.accountNumber')}
-                  className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                    errors.paymentInstruction?.accountNumber ? 'border-destructive' : 'border-input'
-                  }`}
-                />
-              </div>
-              <FieldError message={errors.paymentInstruction?.accountNumber?.message} />
-            </div>
-
-            {/* Account type */}
-            <div>
-              <Label htmlFor="paymentInstruction.accountType" required>
-                Account Type
-              </Label>
-              <div className="mt-2">
-                <select
-                  id="paymentInstruction.accountType"
-                  {...register('paymentInstruction.accountType')}
-                  className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                    errors.paymentInstruction?.accountType ? 'border-destructive' : 'border-input'
-                  }`}
-                >
-                  <option value="">Select account type…</option>
-                  {ACCOUNT_TYPE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <FieldError message={errors.paymentInstruction?.accountType?.message} />
-            </div>
-
-            {/* Hidden — is_internal defaults to false for THIRD_PARTY_PAYMENT */}
-            <input
-              type="hidden"
-              {...register('paymentInstruction.isInternal')}
-              value="false"
-            />
+              </>
+            )}
           </div>
 
           {/* Top-level payment instruction error (e.g. entire block missing) */}

@@ -60,6 +60,23 @@ export async function createTransactionAction(
 
   // 5. Call the PostgreSQL RPC (Req 7.3)
   const supabase = await createClient()
+
+  // Map payment instruction to snake_case keys expected by the RPC (Req 7.7, 21.1)
+  const paymentInstructionRpc = parsed.data.paymentInstruction
+    ? JSON.stringify({
+        beneficiary_name: parsed.data.paymentInstruction.beneficiaryName,
+        bank_name: parsed.data.paymentInstruction.bankName,
+        account_number: parsed.data.paymentInstruction.accountNumber,
+        account_type: parsed.data.paymentInstruction.accountType,
+        purpose: parsed.data.paymentInstruction.purpose ?? null,
+        // is_internal defaults to false for THIRD_PARTY_PAYMENT (Req 21.1)
+        is_internal: parsed.data.paymentInstruction.isInternal === true,
+        // amount and transfer_charge will be set at voucher preparation stage (Req 21.2)
+        amount: null,
+        transfer_charge: null,
+      })
+    : null
+
   const { data, error } = await supabase.rpc('create_treasury_transaction', {
     p_customer_id: parsed.data.customerId,
     p_investment_id: parsed.data.investmentId ?? null,
@@ -68,9 +85,7 @@ export async function createTransactionAction(
     p_requested_amount: parsed.data.requestedAmount,
     p_purpose: parsed.data.purpose,
     p_source_type: parsed.data.sourceInstructionType,
-    p_payment_instruction: parsed.data.paymentInstruction
-      ? JSON.stringify(parsed.data.paymentInstruction)
-      : null,
+    p_payment_instruction: paymentInstructionRpc,
   })
 
   if (error) {

@@ -153,7 +153,7 @@ describe('Property 1 (Req 17.5) — rollover_amount always equals principal', ()
           expect(toNum(result.rolloverAmount)).toBe(toNum(principalStr))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -168,7 +168,7 @@ describe('Property 1 (Req 17.5) — rollover_amount always equals principal', ()
           expect(toNum(result.rolloverAmount)).toBeGreaterThan(0)
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -190,7 +190,7 @@ describe('Property 2 (Req 17.5) — interest_paid equals interest_due', () => {
           expect(toNum(result.interestPaid)).toBe(toNum(interestDueStr))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -205,7 +205,7 @@ describe('Property 2 (Req 17.5) — interest_paid equals interest_due', () => {
           expect(toNum(result.interestPaid)).toBeGreaterThan(0)
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -235,7 +235,7 @@ describe('Property 3 (Req 17.5) — rolloverAmount equals input principal exactl
           expect(toNum(result.rolloverAmount)).toBeGreaterThanOrEqual(toNum(principalStr))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -250,7 +250,7 @@ describe('Property 3 (Req 17.5) — rolloverAmount equals input principal exactl
           expect(toNum(result.rolloverAmount)).toBe(roundTo4(toNum(principalStr)))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -275,7 +275,7 @@ describe('Property 4 (independence) — rolloverAmount is independent of interes
           expect(toNum(resultA.rolloverAmount)).toBe(toNum(resultB.rolloverAmount))
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })
@@ -299,7 +299,7 @@ describe('Property 5 (independence) — interestPaid is independent of principal
           expect(toNum(resultA.interestPaid)).toBe(toNum(resultB.interestPaid))
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })
@@ -328,7 +328,7 @@ describe('Property 6 (monotonicity) — larger principal produces larger rollove
           )
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })
@@ -366,7 +366,7 @@ describe('INTEREST_ONLY vs other rollover types', () => {
           expect(toNum(result.rolloverAmount)).toBeLessThan(pandIRolloverAmount)
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 

@@ -77,6 +77,7 @@ export async function prepareVoucherAction(
       id,
       transaction_type,
       scenario_code,
+      requested_amount,
       investment_verifications (
         principal,
         accrued_interest,
@@ -109,6 +110,25 @@ export async function prepareVoucherAction(
 
   const txType: string = txData.transaction_type
   const scenarioCode: string | null = txData.scenario_code ?? null
+
+  // 5b. For THIRD_PARTY_PAYMENT: look up payment_instructions row to resolve isInternal.
+  //     Do this before the calculation switch so the result is available in step 8.
+  let thirdPartyIsInternal = false
+  let thirdPartyPiRow: { is_internal: boolean } | null = null
+  if (txType === 'THIRD_PARTY_PAYMENT') {
+    const { data: piLookup } = await supabase
+      .from('payment_instructions')
+      .select('is_internal')
+      .eq('transaction_id', transactionId)
+      .maybeSingle()
+    thirdPartyPiRow = piLookup
+    if (piLookup !== null && piLookup !== undefined) {
+      thirdPartyIsInternal = piLookup.is_internal === true
+    } else if (parsed.data.voucherType === 'FUNDS_OUT') {
+      thirdPartyIsInternal =
+        ((parsed.data as Record<string, unknown>).isInternal as boolean | undefined) ?? false
+    }
+  }
 
   // 6. Run server-authoritative calculation (Req 26.3, 26.4)
   //    Dynamically import to keep this module edge-compatible for SSR.
@@ -148,10 +168,24 @@ export async function prepareVoucherAction(
       }
 
       case 'ANNIVERSARY_PAYMENT': {
-        // Frequency days defaults to 30 unless overridden on the form
-        const frequencyDays =
-          ((parsed.data as Record<string, unknown>).frequencyDays as 30 | 60 | 90 | undefined) ??
-          30
+        // Frequency days derived from scenario_code (ANNIVERSARY_30/60/90).
+        // Req 20.1: only 30, 60, 90 are valid — reject any other value.
+        const scenarioToFrequency: Record<string, 30 | 60 | 90> = {
+          ANNIVERSARY_30: 30,
+          ANNIVERSARY_60: 60,
+          ANNIVERSARY_90: 90,
+        }
+
+        if (!scenarioCode || !(scenarioCode in scenarioToFrequency)) {
+          return {
+            success: false,
+            error:
+              `Invalid anniversary scenario code: '${scenarioCode ?? 'none'}'. ` +
+              'Only ANNIVERSARY_30, ANNIVERSARY_60, and ANNIVERSARY_90 are accepted (Req 20.1).',
+          }
+        }
+
+        const frequencyDays: 30 | 60 | 90 = scenarioToFrequency[scenarioCode]
 
         calculationSnapshot = await calculateAnniversaryPayment(
           String(investmentSnapshot.principal),
@@ -162,14 +196,10 @@ export async function prepareVoucherAction(
       }
 
       case 'THIRD_PARTY_PAYMENT': {
-        // isInternal: if scenario_code indicates internal or the voucher data sets it
-        const isInternal =
-          ((parsed.data as Record<string, unknown>).isInternal as boolean | undefined) ?? false
-
-        calculationSnapshot = await calculateThirdPartyCharge(
-          String(investmentSnapshot.available_amount),
-          isInternal,
-        )
+        // isInternal is already resolved above (thirdPartyIsInternal).
+        // Transfer amount = the transaction's requested_amount (Req 21.2, 21.4).
+        const transferAmount = String(txData.requested_amount ?? investmentSnapshot.available_amount)
+        calculationSnapshot = await calculateThirdPartyCharge(transferAmount, thirdPartyIsInternal)
         break
       }
 
@@ -233,14 +263,57 @@ export async function prepareVoucherAction(
       ? (voucherFields as Record<string, unknown>).paymentInstruction
       : null
 
-  // Remove paymentInstruction from the voucher_data payload — it goes as a separate param
+  // Remove transient client-only fields from the voucher_data payload
   const voucherData: Record<string, unknown> = { ...voucherFields }
   delete voucherData.paymentInstruction
+  delete voucherData.isInternal
+  delete voucherData.transactionTypeHint
 
   // Attach the calculation snapshot so the RPC can persist it in
   // vouchers.calculation_snapshot (Req 26.5)
   if (calculationSnapshot !== null) {
     voucherData.calculation_snapshot = calculationSnapshot
+  }
+
+  // 8a. For THIRD_PARTY_PAYMENT external transfers: validate all 6 PI fields
+  //     (Req 36.2, 21.4) — server-side re-enforcement beyond Zod schema.
+  if (txType === 'THIRD_PARTY_PAYMENT') {
+    const piData = paymentInstruction as Record<string, unknown> | null
+    // Determine isExternal from the DB-resolved flag
+    const isExternalTransfer = !thirdPartyIsInternal
+
+    if (isExternalTransfer) {
+      const missingFields: string[] = []
+      if (!piData?.beneficiaryName) missingFields.push('Beneficiary Name')
+      if (!piData?.bankName) missingFields.push('Bank Name')
+      if (!piData?.accountNumber) missingFields.push('Account Number')
+      if (!piData?.accountType) missingFields.push('Account Type')
+      if (!piData?.amount) missingFields.push('Amount')
+      if (piData?.transferCharge === undefined || piData?.transferCharge === null || piData?.transferCharge === '') {
+        missingFields.push('Transfer Charge')
+      }
+
+      if (missingFields.length > 0) {
+        return {
+          success: false,
+          error: `External third-party payment requires all Payment Instruction fields. Missing: ${missingFields.join(', ')}. (Req 36.2)`,
+        }
+      }
+    }
+
+    // 8b. Attach server-authoritative transfer charge to the payment instruction (Req 21.2).
+    //     The calculation snapshot holds the canonical charge value; override whatever the
+    //     client submitted so the persisted PI block always reflects the server calculation.
+    if (calculationSnapshot !== null && paymentInstruction) {
+      const serverCharge = calculationSnapshot.outputs.transfer_charge
+      const piWithCharge: Record<string, unknown> = {
+        ...(paymentInstruction as Record<string, unknown>),
+        transferCharge: serverCharge,
+        transfer_charge: serverCharge,
+      }
+      // Replace the paymentInstruction so the RPC call below uses the corrected value
+      ;(voucherFields as Record<string, unknown>).paymentInstruction = piWithCharge
+    }
   }
 
   // 9. Call the PostgreSQL RPC (Req 11.7)

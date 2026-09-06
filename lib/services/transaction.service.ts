@@ -128,6 +128,18 @@ export interface TransactionWorkspace {
     calculation_snapshot: Record<string, unknown>
     created_at: string
   } | null
+  /**
+   * Payment instruction data from the payment_instructions table (Req 21.1).
+   * Populated when a THIRD_PARTY_PAYMENT was created with paymentInstruction data.
+   */
+  paymentInstruction: {
+    id: string
+    account_number: string
+    beneficiary_name: string | null
+    bank_name: string | null
+    account_type: string | null
+    is_internal: boolean
+  } | null
   approvals: Array<{
     id: string
     stage: string
@@ -293,7 +305,7 @@ export async function getTransactionWorkspace(
   const supabase = await createClient()
 
   // Load all workspace data in parallel
-  const [txResult, sigResult, confResult, invResult, voucherResult, approvalsResult, opsResult, docsResult, auditResult] =
+  const [txResult, sigResult, confResult, invResult, voucherResult, approvalsResult, opsResult, docsResult, auditResult, piResult] =
     await Promise.all([
       // Core transaction + customer + investment
       supabase
@@ -391,6 +403,13 @@ export async function getTransactionWorkspace(
         )
         .eq('transaction_id', transactionId)
         .order('created_at', { ascending: true }),
+
+      // Payment instruction (Req 21.1) — for THIRD_PARTY_PAYMENT internal/external flag
+      supabase
+        .from('payment_instructions')
+        .select('id, account_number, beneficiary_name, bank_name, account_type, is_internal')
+        .eq('transaction_id', transactionId)
+        .maybeSingle(),
     ])
 
   if (txResult.error || !txResult.data) return null
@@ -462,5 +481,6 @@ export async function getTransactionWorkspace(
       ...(e as Record<string, unknown>),
       actor: normaliseProfile((e as Record<string, unknown>).profiles),
     })) as TransactionWorkspace['auditEvents'],
+    paymentInstruction: piResult.data as TransactionWorkspace['paymentInstruction'],
   }
 }

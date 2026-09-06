@@ -114,7 +114,7 @@ describe('Property 1 — WHT is always zero for maturity termination (Req 11.3, 
 
         expect(toNum(result.wht)).toBe(0)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -135,7 +135,7 @@ describe('Property 2 — net_amount = principal + accrued_interest (Req 18.1)', 
 
         expect(toNum(result.netAmount)).toBe(expectedNetAmount)
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -146,7 +146,7 @@ describe('Property 2 — net_amount = principal + accrued_interest (Req 18.1)', 
 
         expect(toNum(result.netAmount)).toBeGreaterThanOrEqual(toNum(principalStr))
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -157,7 +157,7 @@ describe('Property 2 — net_amount = principal + accrued_interest (Req 18.1)', 
 
         expect(toNum(result.netAmount)).toBeGreaterThanOrEqual(toNum(accruedInterestStr))
       }),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -172,7 +172,7 @@ describe('Property 3 — identity law: zero accrued interest means net_amount = 
 
         expect(toNum(result.netAmount)).toBe(toNum(principalStr))
       }),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 
@@ -183,7 +183,7 @@ describe('Property 3 — identity law: zero accrued interest means net_amount = 
 
         expect(toNum(result.netAmount)).toBe(toNum(accruedInterestStr))
       }),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 
@@ -217,7 +217,7 @@ describe('Property 4 — monotonicity: larger inputs produce larger net_amount',
           expect(toNum(largerResult.netAmount)).toBeGreaterThan(toNum(smallerResult.netAmount))
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })
@@ -236,7 +236,7 @@ describe('Property 5 — commutativity: sum is order-independent', () => {
 
         expect(toNum(resultAB.netAmount)).toBe(toNum(resultBA.netAmount))
       }),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })

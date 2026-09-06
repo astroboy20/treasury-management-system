@@ -378,36 +378,36 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Attach `PRE_LIQUIDATION_20_PERCENT` calculation snapshot to voucher.
     - _Requirements: 19.1, 19.3, 19.4_
 
-  - [-] 3.7 Partial Pre-liquidation scenario
+  - [x] 3.7 Partial Pre-liquidation scenario
     - Extend `PRE_LIQUIDATION` path with `requestedPayout` field.
     - `calculatePreLiquidation(accruedInterest, requestedPayout)`: compute `remaining_principal`, `rebooked_principal`; display all intermediate values before voucher preparation.
     - On Operations execution: call `eazybankzAdapter.updateInvestment()` to rebook remaining principal.
     - _Requirements: 19.2, 19.3, 19.5_
 
-  - [ ] 3.8 Anniversary 30-day scenario
+  - [x] 3.8 Anniversary 30-day scenario
     - Support `transaction_type: 'ANNIVERSARY_PAYMENT'` with `scenario_code: 'ANNIVERSARY_30'`.
     - `calculateAnniversaryPayment(principal, interestRate, 30)`: compute interest due.
     - Generate `FUNDS_OUT` voucher with WHT = 0.
     - On execution: `eazybankzAdapter.updateInvestment()` to record interest payment, principal remains active.
     - _Requirements: 20.1, 20.2, 20.3, 20.4_
 
-  - [ ] 3.9 Anniversary 60-day scenario
+  - [x] 3.9 Anniversary 60-day scenario
     - Support `scenario_code: 'ANNIVERSARY_60'` with `calculateAnniversaryPayment(principal, interestRate, 60)`.
     - _Requirements: 20.1, 20.2, 20.3, 20.4_
 
-  - [ ] 3.10 Anniversary 90-day scenario
+  - [x] 3.10 Anniversary 90-day scenario
     - Support `scenario_code: 'ANNIVERSARY_90'` with `calculateAnniversaryPayment(principal, interestRate, 90)`.
     - Validate that only 30, 60, 90 are accepted; server action rejects any other value.
     - _Requirements: 20.1, 20.2, 20.3, 20.4_
 
-  - [ ] 3.11 Third-party External payment scenario
+  - [x] 3.11 Third-party External payment scenario
     - Support `transaction_type: 'THIRD_PARTY_PAYMENT'` with `is_internal = false`.
     - `calculateThirdPartyCharge(transferAmount, false)`: `transfer_charge = amount × 0.001`.
     - Enforce all 6 Payment Instruction fields (Req 36) before voucher can be saved.
     - Persist `THIRD_PARTY_TRANSFER_0_10_PERCENT` calculation snapshot.
     - _Requirements: 21.1, 21.2, 21.4, 21.5, 36.1, 36.2_
 
-  - [ ] 3.12 Third-party Internal payment scenario
+  - [x] 3.12 Third-party Internal payment scenario
     - Support `transaction_type: 'THIRD_PARTY_PAYMENT'` with `is_internal = true`.
     - `calculateThirdPartyCharge(transferAmount, true)`: `transfer_charge = 0`.
     - Render Payment Instruction block with Transfer Charge as `₦0`; pre-fill internal account details.

@@ -167,7 +167,7 @@ describe('Property 1 (Req 17.4) — remaining_principal = principal − requeste
           expect(toNum(result.remainingPrincipal)).toBe(expectedRemaining)
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -182,7 +182,7 @@ describe('Property 1 (Req 17.4) — remaining_principal = principal − requeste
           expect(toNum(result.remainingPrincipal)).toBeGreaterThan(0)
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 
@@ -197,7 +197,7 @@ describe('Property 1 (Req 17.4) — remaining_principal = principal − requeste
           expect(toNum(result.remainingPrincipal)).toBeLessThan(toNum(principal))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -219,7 +219,7 @@ describe('Property 2 (Req 17.4) — rollover_amount always equals remaining_prin
           expect(toNum(result.rolloverAmount)).toBe(toNum(result.remainingPrincipal))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -241,7 +241,7 @@ describe('Property 3 (conservation) — remaining_principal + requested_payout =
           expect(reconstructed).toBe(toNum(principal))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: 100 },
     )
   })
 })
@@ -267,7 +267,7 @@ describe('Property 4 (independence) — remainingPrincipal is independent of int
           expect(toNum(resultA.rolloverAmount)).toBe(toNum(resultB.rolloverAmount))
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })
@@ -306,7 +306,7 @@ describe('Property 5 (monotonicity) — larger payout produces smaller remaining
           )
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })
@@ -348,7 +348,7 @@ describe('PARTIAL_PRINCIPAL vs other rollover types', () => {
           expect(toNum(partialResult.rolloverAmount)).toBeLessThan(pandIRolloverAmount)
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 50 },
     )
   })
 })

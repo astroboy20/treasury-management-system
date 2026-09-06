@@ -20,10 +20,15 @@ export const TransactionTypeEnum = z.enum([
 export type TransactionType = z.infer<typeof TransactionTypeEnum>
 
 export const ScenarioCodeEnum = z.enum([
+  // Rollover scenario codes
   'P_AND_I',
   'PRINCIPAL_ONLY',
   'PARTIAL_PRINCIPAL',
   'INTEREST_ONLY',
+  // Anniversary payment scenario codes (Req 20.1)
+  'ANNIVERSARY_30',
+  'ANNIVERSARY_60',
+  'ANNIVERSARY_90',
 ])
 export type ScenarioCode = z.infer<typeof ScenarioCodeEnum>
 
@@ -50,16 +55,13 @@ export type AccountType = z.infer<typeof AccountTypeEnum>
 // ============================================================
 
 export const PaymentInstructionSchema = z.object({
-  beneficiaryName: z
-    .string({ error: 'Beneficiary name is required.' })
-    .min(1, 'Beneficiary name is required.'),
-  bankName: z
-    .string({ error: 'Bank name is required.' })
-    .min(1, 'Bank name is required.'),
-  accountNumber: z
-    .string({ error: 'Account number is required.' })
-    .min(1, 'Account number is required.'),
-  accountType: AccountTypeEnum,
+  // Optional at the schema level — required fields are enforced in superRefine
+  // based on isInternal. External: beneficiaryName + bankName + accountNumber + accountType.
+  // Internal: accountNumber only (Req 21.1, 21.3).
+  beneficiaryName: z.string().optional(),
+  bankName: z.string().optional(),
+  accountNumber: z.string().optional(),
+  accountType: AccountTypeEnum.optional(),
   isInternal: z.boolean().optional(),
   purpose: z.string().optional(),
 })
@@ -126,6 +128,30 @@ export const CreateTransactionSchema = z
       })
     }
 
+    // ANNIVERSARY_PAYMENT transactions must supply a scenario code
+    if (data.transactionType === 'ANNIVERSARY_PAYMENT' && !data.scenarioCode) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['scenarioCode'],
+        message: 'Scenario code is required for anniversary payment transactions.',
+      })
+    }
+
+    // ANNIVERSARY_PAYMENT scenario code must be exactly ANNIVERSARY_30, ANNIVERSARY_60, or ANNIVERSARY_90 (Req 20.1)
+    const VALID_ANNIVERSARY_CODES = new Set(['ANNIVERSARY_30', 'ANNIVERSARY_60', 'ANNIVERSARY_90'])
+    if (
+      data.transactionType === 'ANNIVERSARY_PAYMENT' &&
+      data.scenarioCode &&
+      !VALID_ANNIVERSARY_CODES.has(data.scenarioCode)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['scenarioCode'],
+        message:
+          'Anniversary payments only support frequencies of 30, 60, or 90 days (ANNIVERSARY_30, ANNIVERSARY_60, ANNIVERSARY_90).',
+      })
+    }
+
     // PARTIAL_PRINCIPAL rollovers require a requestedPayout
     if (
       data.transactionType === 'ROLLOVER' &&
@@ -139,7 +165,7 @@ export const CreateTransactionSchema = z
       })
     }
 
-    // External payment types require a full payment instruction (Req 7.7)
+    // THIRD_PARTY_PAYMENT always requires a paymentInstruction block (Req 7.7, 21.1)
     if (EXTERNAL_PAYMENT_TYPES.includes(data.transactionType)) {
       if (!data.paymentInstruction) {
         ctx.addIssue({
@@ -151,6 +177,20 @@ export const CreateTransactionSchema = z
       }
 
       const pi = data.paymentInstruction
+
+      // Internal transfers (Req 21.1, 21.3): only accountNumber is required
+      if (pi.isInternal === true) {
+        if (!pi.accountNumber) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['paymentInstruction', 'accountNumber'],
+            message: 'Internal account number is required for internal transfers.',
+          })
+        }
+        return
+      }
+
+      // External transfers (Req 7.7, 36.1): all 3 fields required
       if (!pi.beneficiaryName) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

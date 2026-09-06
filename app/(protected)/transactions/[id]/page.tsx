@@ -10,6 +10,7 @@ import Step1Instruction from './_components/Step1Instruction'
 import Step2SignatureVerification from './_components/Step2SignatureVerification'
 import Step3CustomerConfirmation, { BENEFICIARY_REQUIRED_TYPES } from './_components/Step3CustomerConfirmation'
 import Step4InvestmentVerification from './_components/Step4InvestmentVerification'
+import Step5VoucherGeneration from './_components/Step5VoucherGeneration'
 import Step6ApprovalChain from './_components/Step6ApprovalChain'
 import { eazybankzAdapter } from '@/lib/services/eazybankz'
 import type { StepMeta } from '@/lib/services/workflow.service'
@@ -202,9 +203,15 @@ function StepContent({ step, workspace, userRole, userId, eazybankzData }: StepC
       )
     case 5:
       return (
-        <p className="text-sm text-muted-foreground">
-          Voucher preparation panel — coming in task 2.18
-        </p>
+        <Step5VoucherGeneration
+          transactionId={workspace.transaction.id}
+          transactionType={workspace.transaction.transaction_type}
+          scenarioCode={workspace.transaction.scenario_code}
+          investmentVerification={workspace.investmentVerification}
+          voucher={workspace.voucher}
+          canAct={userRole === 'TREASURY_OFFICER' || userRole === 'ADMIN'}
+          existingPaymentInstruction={workspace.paymentInstruction}
+        />
       )
     case 6:
       return (

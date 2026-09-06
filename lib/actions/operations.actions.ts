@@ -183,6 +183,27 @@ export async function executeTransactionAction(
             break
           }
 
+          // ── ANNIVERSARY_PAYMENT: reset accrued interest, principal stays ACTIVE (Req 20.4) ─
+          case 'ANNIVERSARY_PAYMENT': {
+            if (txData.investment_id) {
+              const { data: investment } = await supabase
+                .from('investments')
+                .select('external_reference')
+                .eq('id', txData.investment_id)
+                .maybeSingle()
+
+              if (investment?.external_reference) {
+                // Record interest payment: accrued_interest resets to 0.
+                // The investment status remains ACTIVE — principal is NOT terminated (Req 20.4).
+                await eazybankzAdapter.updateInvestment(investment.external_reference, {
+                  accruedInterest: '0',
+                  sourceTransactionId: transactionId,
+                })
+              }
+            }
+            break
+          }
+
           default:
             // Other transaction types are handled in later phases (4.5).
             break

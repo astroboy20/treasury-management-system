@@ -33,6 +33,61 @@ const remarks = z
   .optional()
 
 // ============================================================
+// Payment Instruction sub-schema (Req 36)
+// Shared by FUNDS_OUT (external) and ROLLOVER_SLIP (when interest
+// is paid out externally).
+//
+// For THIRD_PARTY_PAYMENT (is_internal = false), all six fields
+// are REQUIRED before the voucher may be saved (Req 36.1, 36.2, 21.4).
+// For internal transfers, the block is still rendered but Transfer
+// Charge is shown as ₦0 and some fields may be optional (Req 36.3).
+// ============================================================
+
+export const VoucherPaymentInstructionSchema = z.object({
+  /**
+   * All fields are optional at the schema level.
+   * External transfers (isInternal = false): all 6 fields enforced by FundsOutVoucherSchema.superRefine (Req 36.1, 36.2, 21.4).
+   * Internal transfers (isInternal = true): only accountNumber required; charge always 0 (Req 21.3, 36.3).
+   */
+
+  /** Full legal name of the external beneficiary — required for external only (Req 36.1). */
+  beneficiaryName: z.string().optional(),
+
+  /** Destination bank name — required for external only (Req 36.1). */
+  bankName: z.string().optional(),
+
+  /** NUBAN / account number (Req 36.1). */
+  accountNumber: z.string().optional(),
+
+  /** Account type at the destination bank — required for external only (Req 36.1). */
+  accountType: z.string().optional(),
+
+  /**
+   * Transfer amount — required for external only (Req 36.1, 21.4).
+   * Validated as a positive NUMERIC-compatible string in superRefine.
+   */
+  amount: z.string().optional(),
+
+  /**
+   * Transfer charge — computed server-side (0.10% for external, 0 for internal).
+   * Included in the payment instruction block for display and persistence (Req 36.1).
+   * Defaults to "0"; the server always recomputes the authoritative value.
+   */
+  transferCharge: z.string().optional(),
+
+  /** Optional purpose / narration for the payment (Req 36.1). */
+  purpose: z.string().optional(),
+
+  /**
+   * Whether this is an intra-company (internal) transfer.
+   * Defaults to false — external by default for THIRD_PARTY_PAYMENT (Req 21.1).
+   */
+  isInternal: z.boolean().optional(),
+})
+
+export type VoucherPaymentInstruction = z.infer<typeof VoucherPaymentInstructionSchema>
+
+// ============================================================
 // Voucher Type enum
 // Mirrors migration 001 CHECK on vouchers.voucher_type
 // The server resolves the correct type from the transaction type;
@@ -98,38 +153,128 @@ export type FundsInVoucherInput = z.infer<typeof FundsInVoucherSchema>
 //
 // WHT is stored but defaults to 0 per SOP for maturity
 // termination and anniversary payments.
-// For SAVINGS/CALL/CMS: availableBalance replaces principal (Req 38)
+// For SAVINGS/CALL/CMS: availableBalance replaces principal (Req 38).
+//
+// For THIRD_PARTY_PAYMENT with is_internal = false, paymentInstruction
+// is REQUIRED with all 6 fields (Req 36.1, 36.2, 21.4).
 // ============================================================
 
-export const FundsOutVoucherSchema = z.object({
-  voucherType: z.literal('FUNDS_OUT'),
+export const FundsOutVoucherSchema = z
+  .object({
+    voucherType: z.literal('FUNDS_OUT'),
 
-  // principal is required for standard Funds-Out scenarios
-  principal: positiveNumericString('Principal'),
+    // principal is required for standard Funds-Out scenarios
+    principal: positiveNumericString('Principal'),
 
-  // interest may be 0 for certain scenarios
-  interest: numericString('Interest'),
+    // interest may be 0 for certain scenarios
+    interest: numericString('Interest'),
 
-  // WHT — defaults to 0 per SOP
-  wht: numericString('WHT').default('0'),
+    // WHT — defaults to 0 per SOP
+    wht: numericString('WHT').default('0'),
 
-  // charge — pre-liquidation charge; 0 for maturity/anniversary
-  charge: numericString('Charge').default('0'),
+    // charge — pre-liquidation or transfer charge; 0 for maturity/anniversary
+    charge: numericString('Charge').default('0'),
 
-  // net_amount — authoritative value computed by server; submitted
-  // for display/confirmation; server validates against snapshot
-  netAmount: positiveNumericString('Net amount'),
+    // net_amount — authoritative value computed by server; submitted
+    // for display/confirmation; server validates against snapshot
+    netAmount: positiveNumericString('Net amount'),
 
-  // availableBalance — for SAVINGS/CALL/CMS Funds-Out (Req 38)
-  availableBalance: numericString('Available balance').optional(),
+    // availableBalance — for SAVINGS/CALL/CMS Funds-Out (Req 38)
+    availableBalance: numericString('Available balance').optional(),
 
-  // requestedPayout — for partial PRE_LIQUIDATION (Req 19.2)
-  // The amount being paid out from the principal; triggers rebooked_principal computation.
-  requestedPayout: positiveNumericString('Requested payout').optional(),
+    // requestedPayout — for partial PRE_LIQUIDATION (Req 19.2)
+    requestedPayout: positiveNumericString('Requested payout').optional(),
 
-  transferDate: isoDateString('Transfer date'),
-  remarks,
-})
+    /**
+     * Payment Instruction block (Req 36).
+     * Required for THIRD_PARTY_PAYMENT (is_internal = false) — all 6 fields enforced.
+     * Optional for other FUNDS_OUT scenarios that may involve external payment.
+     * Enforcement for mandatory presence is in .superRefine() below.
+     */
+    paymentInstruction: VoucherPaymentInstructionSchema.optional(),
+
+    /**
+     * Whether this is an internal transfer (Req 21.1).
+     * Passed from the form so the server action can derive isInternal correctly.
+     * The RPC also reads payment_instructions.is_internal — this is for client-side routing.
+     */
+    isInternal: z.boolean().optional(),
+
+    /**
+     * The transaction type — threaded through so .superRefine() can enforce
+     * payment instruction requirements without a separate field lookup.
+     * Not persisted on the voucher itself.
+     */
+    transactionTypeHint: z.string().optional(),
+
+    transferDate: isoDateString('Transfer date'),
+    remarks,
+  })
+  .superRefine((data, ctx) => {
+    // Req 36.2, 21.4: For THIRD_PARTY_PAYMENT external transfers, all 6 PI fields are REQUIRED.
+    // For internal transfers (isInternal = true), PI is optional and only accountNumber matters.
+    const isExternalThirdParty =
+      data.transactionTypeHint === 'THIRD_PARTY_PAYMENT' && data.isInternal !== true
+
+    if (isExternalThirdParty) {
+      const pi = data.paymentInstruction
+
+      if (!pi) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentInstruction'],
+          message: 'Payment instruction is required for external third-party payments.',
+        })
+        return
+      }
+
+      // All 6 fields must be present (Req 36.1, 21.4):
+      // beneficiaryName, bankName, accountNumber, accountType, amount, transferCharge
+      if (!pi.beneficiaryName) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentInstruction', 'beneficiaryName'],
+          message: 'Beneficiary name is required for external payments.',
+        })
+      }
+      if (!pi.bankName) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentInstruction', 'bankName'],
+          message: 'Bank name is required for external payments.',
+        })
+      }
+      if (!pi.accountNumber) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentInstruction', 'accountNumber'],
+          message: 'Account number is required for external payments.',
+        })
+      }
+      if (!pi.accountType) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentInstruction', 'accountType'],
+          message: 'Account type is required for external payments.',
+        })
+      }
+      if (!pi.amount || Number(pi.amount) <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentInstruction', 'amount'],
+          message: 'Transfer amount is required for external payments.',
+        })
+      }
+      // transferCharge must be present (may be "0" client-side; server overwrites)
+      if (pi.transferCharge === undefined || pi.transferCharge === null || pi.transferCharge === '') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentInstruction', 'transferCharge'],
+          message: 'Transfer charge is required for external payments.',
+        })
+      }
+    }
+  })
 
 export type FundsOutVoucherInput = z.infer<typeof FundsOutVoucherSchema>
 

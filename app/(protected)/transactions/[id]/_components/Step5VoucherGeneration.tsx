@@ -41,6 +41,11 @@ interface Step5VoucherGenerationProps {
   voucher: TransactionWorkspace['voucher']
   /** Whether the current user can act (TREASURY_OFFICER) */
   canAct: boolean
+  /**
+   * Payment instruction data from the transaction record.
+   * Used to determine if this is an internal THIRD_PARTY_PAYMENT (Req 21.1, 21.3).
+   */
+  existingPaymentInstruction?: { is_internal?: boolean } | null
 }
 
 // ─── Types for voucher action (forward declaration to avoid circular import) ──
@@ -224,12 +229,15 @@ function CalculationPreview({
   transactionType,
   scenarioCode,
   requestedPayout,
+  isInternalPayment,
 }: {
   snapshot: NonNullable<TransactionWorkspace['investmentVerification']>
   transactionType: string
   scenarioCode?: string | null
   /** For PARTIAL_PRINCIPAL: the payout amount entered by the Treasury Officer */
   requestedPayout?: string | null
+  /** For THIRD_PARTY_PAYMENT: whether this is an internal transfer (Req 21.3) */
+  isInternalPayment?: boolean
 }) {
   return (
     <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4 space-y-3">
@@ -313,13 +321,39 @@ function CalculationPreview({
             <div className="sm:col-span-2">
               <Separator className="my-1" />
               <p className="text-xs font-medium text-blue-700 mt-2">
-                Transfer charge (external: 0.10%)
+                {isInternalPayment
+                  ? 'Transfer charge (internal: ₦0 — THIRD_PARTY_TRANSFER_0_10_PERCENT, internal path)'
+                  : 'Transfer charge (external: 0.10% — THIRD_PARTY_TRANSFER_0_10_PERCENT)'}
               </p>
             </div>
             <Field
-              label="Estimated charge (0.10%)"
-              value="Computed server-side at voucher preparation"
+              label="Available Amount (snapshot)"
+              value={formatCurrency(snapshot.available_amount)}
             />
+            {isInternalPayment ? (
+              <Field
+                label="Transfer Charge"
+                value={<span className="text-muted-foreground">₦0.00 (internal — no charge)</span>}
+              />
+            ) : (
+              <Field
+                label="Estimated charge (0.10% of transfer amount)"
+                value={
+                  parseFloat(snapshot.available_amount) > 0
+                    ? formatCurrency(
+                        String(Math.round(parseFloat(snapshot.available_amount) * 0.001 * 1e4) / 1e4)
+                      )
+                    : 'Enter transfer amount in the form below'
+                }
+              />
+            )}
+            <div className="sm:col-span-2">
+              <p className="text-xs text-blue-600/80">
+                {isInternalPayment
+                  ? 'Rule: THIRD_PARTY_TRANSFER_0_10_PERCENT (internal path) — transfer_charge = 0. No charge for intra-company transfers.'
+                  : 'Rule: transfer_charge = transfer_amount × 0.001. Server computes the authoritative charge and overwrites any client value (Req 21.2, 26.4). All 6 Payment Instruction fields are required before the voucher can be saved (Req 36.2).'}
+              </p>
+            </div>
           </>
         )}
         {transactionType === 'ROLLOVER' && (
@@ -405,13 +439,41 @@ interface PaymentInstructionFormProps {
   register: ReturnType<typeof useForm<VoucherPreparationInput>>['register']
   errors: Record<string, { message?: string } | undefined>
   fieldPrefix?: string
+  /** When true, show only Internal Account Number (Req 21.1, 21.3) */
+  isInternalPayment?: boolean
 }
 
 /**
  * Reusable payment instruction sub-form block (Req 36).
  * Shown for all voucher types where money leaves the company.
+ * For internal THIRD_PARTY_PAYMENT, shows only the account number field (Req 21.3).
  */
-function PaymentInstructionSubForm({ disabled, register, errors }: PaymentInstructionFormProps) {
+function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayment }: PaymentInstructionFormProps) {
+  if (isInternalPayment) {
+    return (
+      <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <p className="text-xs font-semibold text-foreground">Payment Instruction — Internal Transfer</p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Internal transfer — Transfer Charge: ₦0.00 (no charge for intra-company transfers)
+        </p>
+        <div className="grid gap-4">
+          <FormField id="pi-internal-account-number" label="Internal Account Number" error={(errors as Record<string, { message?: string }>)['paymentInstruction.accountNumber']?.message}>
+            <Input
+              id="pi-internal-account-number"
+              placeholder="Internal account number"
+              disabled={disabled}
+              {...register('paymentInstruction.accountNumber' as never)}
+              className="text-sm"
+            />
+          </FormField>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-4">
       <div className="flex items-center gap-2">
@@ -566,16 +628,48 @@ function FundsOutVoucherContent({ voucher }: { voucher: NonNullable<TransactionW
     (snap?.rule as string | undefined) === 'PRE_LIQUIDATION_20_PERCENT' &&
     Boolean(inputs?.requested_payout && Number(inputs.requested_payout) > 0)
 
+  const isThirdPartyTransfer =
+    (snap?.rule as string | undefined) === 'THIRD_PARTY_TRANSFER_0_10_PERCENT'
+
+  const isInternalTransfer = isThirdPartyTransfer && inputs?.is_internal === 'true'
+
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
       {voucher.available_balance ? (
         <Field label="Available Balance" value={formatCurrency(voucher.available_balance)} />
       ) : (
-        <Field label="Principal" value={formatCurrency(voucher.principal)} />
+        <Field label={isThirdPartyTransfer ? 'Transfer Amount' : 'Principal'} value={formatCurrency(voucher.principal)} />
       )}
-      <Field label="Interest" value={formatCurrency(voucher.interest)} />
-      <Field label="WHT" value={formatCurrency(voucher.wht ?? '0')} />
-      <Field label="Charge (20% of interest)" value={formatCurrency(voucher.charge ?? '0')} />
+      {!isThirdPartyTransfer && (
+        <Field label="Interest" value={formatCurrency(voucher.interest)} />
+      )}
+      {!isThirdPartyTransfer && (
+        <Field label="WHT" value={formatCurrency(voucher.wht ?? '0')} />
+      )}
+      {!isThirdPartyTransfer && (
+        <Field label="Charge (20% of interest)" value={formatCurrency(voucher.charge ?? '0')} />
+      )}
+      {isThirdPartyTransfer && (
+        <>
+          <Field
+            label="Transfer Charge (0.10%)"
+            value={
+              <span className={isInternalTransfer ? 'text-muted-foreground' : 'font-medium text-foreground'}>
+                {isInternalTransfer
+                  ? '₦0.00 (internal transfer)'
+                  : formatCurrency(outputs?.transfer_charge ?? voucher.charge ?? '0')}
+              </span>
+            }
+          />
+          <div className="sm:col-span-2">
+            <dt className="text-xs font-medium text-muted-foreground">Calculation Rule</dt>
+            <dd className="mt-1 font-mono text-xs text-muted-foreground">
+              THIRD_PARTY_TRANSFER_0_10_PERCENT
+              {isInternalTransfer ? ' (internal — charge = ₦0)' : ' (external — charge = amount × 0.001)'}
+            </dd>
+          </div>
+        </>
+      )}
       {isPartialPreLiquidation && (
         <>
           <Field label="Requested Payout" value={formatCurrency(inputs?.requested_payout ?? '0')} />
@@ -732,6 +826,8 @@ interface VariantFormProps {
   scenarioCode?: string | null
   /** Optional transaction type for type-specific UI hints */
   transactionType?: string
+  /** Whether this THIRD_PARTY_PAYMENT is an internal transfer (Req 21.1, 21.3) */
+  isInternalPayment?: boolean
 }
 
 function FundsInForm({ disabled, register, errors }: VariantFormProps) {
@@ -765,13 +861,16 @@ function FundsInForm({ disabled, register, errors }: VariantFormProps) {
   )
 }
 
-function FundsOutForm({ disabled, register, errors, snapshot, transactionType, scenarioCode, watch }: VariantFormProps) {
+function FundsOutForm({ disabled, register, errors, snapshot, transactionType, scenarioCode, watch, isInternalPayment }: VariantFormProps) {
   const errs = errors as Record<string, { message?: string } | undefined>
   const isPreLiquidation = transactionType === 'PRE_LIQUIDATION'
+  const isThirdParty = transactionType === 'THIRD_PARTY_PAYMENT'
+
   // Partial pre-liquidation: PRE_LIQUIDATION transaction with a requestedPayout value.
   // The scenarioCode is not set on PRE_LIQUIDATION (unlike ROLLOVER); instead the user
   // enters a requestedPayout amount which triggers the partial path server-side (Req 19.2).
   const watchedPayout = (watch?.('requestedPayout' as never) as unknown) as string | undefined
+  const watchedNetAmount = (watch?.('netAmount' as never) as unknown) as string | undefined
   const isPartialPreLiquidation = isPreLiquidation && Boolean(watchedPayout && Number(watchedPayout) > 0)
 
   // Live intermediate values for partial pre-liquidation display (Req 19.2)
@@ -789,8 +888,23 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
       ? Math.round((remainingPrincipal - charge) * 1e4) / 1e4
       : null
 
+  // Third-party charge preview — estimated client-side (0.10%); server is authoritative (Req 21.2)
+  const parsedNetAmount = watchedNetAmount ? parseFloat(watchedNetAmount) : NaN
+  const estimatedThirdPartyCharge =
+    isThirdParty && isFinite(parsedNetAmount) && parsedNetAmount > 0
+      ? Math.round(parsedNetAmount * 0.001 * 1e4) / 1e4
+      : null
+
   return (
     <div className="space-y-4">
+      {/* Hidden fields so Zod .superRefine() can route validation correctly (Req 36.2, 21.4) */}
+      {isThirdParty && (
+        <>
+          <input type="hidden" {...(register('transactionTypeHint' as never))} value="THIRD_PARTY_PAYMENT" />
+          <input type="hidden" {...(register('isInternal' as never))} value={isInternalPayment ? "true" : "false"} />
+        </>
+      )}
+
       {isPreLiquidation && !isPartialPreLiquidation && (
         <Alert>
           <AlertTitle>Pre-Liquidation — Full (20% charge)</AlertTitle>
@@ -835,19 +949,87 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
           </AlertDescription>
         </Alert>
       )}
+
+      {/* Third-party payment notice — internal vs external (Req 21.1, 21.2, 21.3, 21.4) */}
+      {isThirdParty && isInternalPayment && (
+        <Alert>
+          <AlertTitle>Internal Transfer — No Transfer Charge</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span className="block">
+              Rule: <strong>THIRD_PARTY_TRANSFER_0_10_PERCENT</strong> (internal path) — transfer_charge = 0.
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              This is an intra-company transfer. No transfer charge applies.
+              Enter the internal account details in the Payment Instruction block below.
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+      {isThirdParty && !isInternalPayment && (
+        <Alert>
+          <AlertTitle>Third-Party External Payment — 0.10% Transfer Charge</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span className="block">
+              Rule: <strong>THIRD_PARTY_TRANSFER_0_10_PERCENT</strong> — transfer charge = transfer amount × 0.001.
+            </span>
+            {estimatedThirdPartyCharge !== null && (
+              <span className="block">
+                Estimated charge on{' '}
+                <strong>{formatCurrency(String(parsedNetAmount))}</strong>:{' '}
+                <strong className="tabular-nums">{formatCurrency(String(estimatedThirdPartyCharge))}</strong>
+              </span>
+            )}
+            <span className="block text-xs text-muted-foreground">
+              The server computes the authoritative charge via PostgreSQL NUMERIC and overwrites
+              any client-supplied value. All 6 Payment Instruction fields are required (Req 36.2).
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField id="fo-principal" label="Principal (₦)" hint={`Snapshot: ${formatCurrency(snapshot.principal)}`} error={errs.principal?.message}>
-          <Input id="fo-principal" type="text" inputMode="decimal" defaultValue={snapshot.principal} disabled={disabled} {...register('principal' as never)} className="text-sm" />
+        {/* For THIRD_PARTY_PAYMENT: show "Transfer Amount" label instead of "Principal" */}
+        <FormField
+          id="fo-principal"
+          label={isThirdParty ? 'Transfer Amount (₦)' : 'Principal (₦)'}
+          hint={isThirdParty ? 'The gross amount being transferred to the beneficiary' : `Snapshot: ${formatCurrency(snapshot.principal)}`}
+          error={errs.principal?.message}
+        >
+          <Input
+            id="fo-principal"
+            type="text"
+            inputMode="decimal"
+            defaultValue={isThirdParty ? '' : snapshot.principal}
+            disabled={disabled}
+            {...register('principal' as never)}
+            className="text-sm"
+          />
         </FormField>
-        <FormField id="fo-interest" label="Interest (₦)" hint={`Snapshot: ${formatCurrency(snapshot.accrued_interest)}`} error={errs.interest?.message}>
-          <Input id="fo-interest" type="text" inputMode="decimal" defaultValue={snapshot.accrued_interest} disabled={disabled} {...register('interest' as never)} className="text-sm" />
-        </FormField>
-        <FormField id="fo-wht" label="WHT (₦)" hint="Defaults to 0 per SOP" error={errs.wht?.message}>
-          <Input id="fo-wht" type="text" inputMode="decimal" defaultValue="0" disabled={disabled} {...register('wht' as never)} className="text-sm" />
-        </FormField>
-        <FormField id="fo-charge" label="Charge (₦)" hint={isPreLiquidation ? '20% of accrued interest (PRE_LIQUIDATION_20_PERCENT rule)' : 'Pre-liquidation or transfer charge'} error={errs.charge?.message}>
-          <Input id="fo-charge" type="text" inputMode="decimal" defaultValue="0" disabled={disabled} {...register('charge' as never)} className="text-sm" />
-        </FormField>
+        {/* Interest field — hidden for THIRD_PARTY_PAYMENT (no interest component) */}
+        {!isThirdParty && (
+          <FormField id="fo-interest" label="Interest (₦)" hint={`Snapshot: ${formatCurrency(snapshot.accrued_interest)}`} error={errs.interest?.message}>
+            <Input id="fo-interest" type="text" inputMode="decimal" defaultValue={snapshot.accrued_interest} disabled={disabled} {...register('interest' as never)} className="text-sm" />
+          </FormField>
+        )}
+        {!isThirdParty && (
+          <FormField id="fo-wht" label="WHT (₦)" hint="Defaults to 0 per SOP" error={errs.wht?.message}>
+            <Input id="fo-wht" type="text" inputMode="decimal" defaultValue="0" disabled={disabled} {...register('wht' as never)} className="text-sm" />
+          </FormField>
+        )}
+        {/* Charge — hidden for THIRD_PARTY_PAYMENT; server computes from PI block (Req 21.2) */}
+        {!isThirdParty && (
+          <FormField id="fo-charge" label="Charge (₦)" hint={isPreLiquidation ? '20% of accrued interest (PRE_LIQUIDATION_20_PERCENT rule)' : 'Pre-liquidation or transfer charge'} error={errs.charge?.message}>
+            <Input id="fo-charge" type="text" inputMode="decimal" defaultValue="0" disabled={disabled} {...register('charge' as never)} className="text-sm" />
+          </FormField>
+        )}
+        {/* Hidden defaults for THIRD_PARTY_PAYMENT so Zod schema passes numeric validation */}
+        {isThirdParty && (
+          <>
+            <input type="hidden" {...(register('interest' as never))} value="0" />
+            <input type="hidden" {...(register('wht' as never))} value="0" />
+            <input type="hidden" {...(register('charge' as never))} value="0" />
+          </>
+        )}
         {isPreLiquidation && (
           <FormField
             id="fo-requested-payout"
@@ -867,7 +1049,12 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
             />
           </FormField>
         )}
-        <FormField id="fo-net-amount" label="Net Amount (₦)" hint="Server will validate against snapshot" error={errs.netAmount?.message}>
+        <FormField
+          id="fo-net-amount"
+          label={isThirdParty ? 'Net Amount / Transfer Amount (₦)' : 'Net Amount (₦)'}
+          hint={isThirdParty ? 'Enter the transfer amount; server computes the 0.10% charge separately' : 'Server will validate against snapshot'}
+          error={errs.netAmount?.message}
+        >
           <Input id="fo-net-amount" type="text" inputMode="decimal" placeholder="Computed net amount" disabled={disabled} {...register('netAmount' as never)} className="text-sm" />
         </FormField>
         <FormField id="fo-transfer-date" label="Transfer Date" error={errs.transferDate?.message}>
@@ -1019,6 +1206,7 @@ function buildDefaults(
   snapshot: TransactionWorkspace['investmentVerification'],
   scenarioCode?: string | null,
   transactionType?: string,
+  isInternalPayment?: boolean,
 ): Partial<VoucherPreparationInput> {
   const todayStr = today()
 
@@ -1038,6 +1226,7 @@ function buildDefaults(
   if (voucherType === 'FUNDS_OUT') {
     // For PRE_LIQUIDATION, pre-fill the 20% charge and net amount from the snapshot (Req 19.3, 19.4)
     const isPreLiquidation = transactionType === 'PRE_LIQUIDATION'
+    const isThirdParty = transactionType === 'THIRD_PARTY_PAYMENT'
     const accruedInterest = parseFloat(snapshot?.accrued_interest ?? '0')
     const preLiqCharge = isPreLiquidation && isFinite(accruedInterest)
       ? (Math.round(accruedInterest * 0.20 * 1e4) / 1e4).toString()
@@ -1062,6 +1251,10 @@ function buildDefaults(
       requestedPayout: undefined,
       transferDate: todayStr,
       remarks: '',
+      // Req 36.2, 21.4: thread transactionTypeHint and isInternal so
+      // Zod .superRefine() can enforce all 6 PI fields for THIRD_PARTY_PAYMENT external
+      transactionTypeHint: isThirdParty ? 'THIRD_PARTY_PAYMENT' : undefined,
+      isInternal: isThirdParty ? (isInternalPayment ?? false) : undefined,
     } satisfies Partial<FundsOutVoucherInput>
   }
 
@@ -1137,9 +1330,13 @@ export default function Step5VoucherGeneration({
   investmentVerification,
   voucher,
   canAct,
+  existingPaymentInstruction,
 }: Step5VoucherGenerationProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+
+  // Derive isInternalPayment from the transaction's payment instruction (Req 21.1, 21.3)
+  const isInternalPayment = existingPaymentInstruction?.is_internal ?? false
 
   // Req 11.1 — server-resolved voucher type; frontend reads it, not user-selectable
   const resolvedVoucherType: VoucherType =
@@ -1147,7 +1344,7 @@ export default function Step5VoucherGeneration({
 
   const requiresPaymentInstruction = REQUIRES_PAYMENT_INSTRUCTION.has(transactionType)
 
-  const defaults = buildDefaults(resolvedVoucherType, investmentVerification, scenarioCode, transactionType)
+  const defaults = buildDefaults(resolvedVoucherType, investmentVerification, scenarioCode, transactionType, isInternalPayment)
 
   const {
     register,
@@ -1217,6 +1414,7 @@ export default function Step5VoucherGeneration({
     errors,
     scenarioCode,
     transactionType,
+    isInternalPayment,
     snapshot: investmentVerification ?? {
       id: '', verified_by: '', source_system: 'EAZYBANKZ',
       principal: '0', accrued_interest: '0', interest_rate: '0',
@@ -1273,6 +1471,7 @@ export default function Step5VoucherGeneration({
           transactionType={transactionType}
           scenarioCode={scenarioCode}
           requestedPayout={watchedRequestedPayout}
+          isInternalPayment={isInternalPayment}
         />
       )}
 
@@ -1297,6 +1496,7 @@ export default function Step5VoucherGeneration({
             disabled={disabled}
             register={register}
             errors={errors as Record<string, { message?: string } | undefined>}
+            isInternalPayment={transactionType === 'THIRD_PARTY_PAYMENT' ? isInternalPayment : false}
           />
         )}
 

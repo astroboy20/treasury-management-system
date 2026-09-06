@@ -121,25 +121,103 @@ const VOUCHER_TYPE_LABELS: Record<VoucherType, string> = {
  *
  * Used for: MATURITY_TERMINATION, ANNIVERSARY_PAYMENT, PRE_LIQUIDATION,
  *           THIRD_PARTY_PAYMENT.
+ *
+ * For THIRD_PARTY_PAYMENT (is_internal = false):
+ *   - Shows "Transfer Amount" instead of "Principal"
+ *   - Shows transfer charge from calculation_snapshot (THIRD_PARTY_TRANSFER_0_10_PERCENT rule)
+ *   - Hides irrelevant interest/WHT fields
  */
 export function FundsOutVoucher({ voucher }: { voucher: VoucherData }) {
+  const snap = voucher.calculation_snapshot as Record<string, unknown> | null
+  const snapRule = snap?.rule as string | undefined
+  const snapOutputs = snap?.outputs as Record<string, string> | undefined
+  const snapInputs = snap?.inputs as Record<string, string> | undefined
+
+  // Detect THIRD_PARTY_TRANSFER_0_10_PERCENT rule (Req 21.2, 21.5)
+  const isThirdPartyTransfer = snapRule === 'THIRD_PARTY_TRANSFER_0_10_PERCENT'
+  const isInternalTransfer = isThirdPartyTransfer && snapInputs?.is_internal === 'true'
+
+  // Detect partial pre-liquidation
+  const isPartialPreLiquidation =
+    snapRule === 'PRE_LIQUIDATION_20_PERCENT' &&
+    Boolean(snapInputs?.requested_payout && Number(snapInputs.requested_payout) > 0)
+
+  // Server-computed transfer charge (Req 21.2) — authoritative
+  const thirdPartyCharge = snapOutputs?.transfer_charge ?? voucher.charge ?? '0'
+
   return (
     <div className="space-y-4">
       <dl className="grid gap-3 sm:grid-cols-2">
-        <Field label="Principal" value={formatCurrency(voucher.principal)} />
-        <Field label="Interest" value={formatCurrency(voucher.interest)} />
+        {/* For THIRD_PARTY_PAYMENT: "Transfer Amount"; others: "Principal" */}
         <Field
-          label="WHT"
-          value={
-            <span className="text-muted-foreground">
-              {formatCurrency(voucher.wht ?? '0')}
-            </span>
-          }
+          label={isThirdPartyTransfer ? 'Transfer Amount' : 'Principal'}
+          value={formatCurrency(voucher.principal)}
         />
-        <Field
-          label="Charge"
-          value={formatCurrency(voucher.charge ?? '0')}
-        />
+
+        {/* Interest — hidden for THIRD_PARTY_PAYMENT (no interest component) */}
+        {!isThirdPartyTransfer && (
+          <Field label="Interest" value={formatCurrency(voucher.interest)} />
+        )}
+
+        {/* WHT — hidden for THIRD_PARTY_PAYMENT */}
+        {!isThirdPartyTransfer && (
+          <Field
+            label="WHT"
+            value={
+              <span className="text-muted-foreground">
+                {formatCurrency(voucher.wht ?? '0')}
+              </span>
+            }
+          />
+        )}
+
+        {/* Charge field: for PRE_LIQUIDATION show "Charge"; for THIRD_PARTY show Transfer Charge */}
+        {isThirdPartyTransfer ? (
+          <Field
+            label="Transfer Charge (0.10%)"
+            value={
+              <span className={isInternalTransfer ? 'text-muted-foreground' : 'font-medium text-foreground'}>
+                {isInternalTransfer
+                  ? '₦0.00 (internal transfer — no charge)'
+                  : formatCurrency(thirdPartyCharge)}
+              </span>
+            }
+          />
+        ) : (
+          <Field
+            label="Charge"
+            value={formatCurrency(voucher.charge ?? '0')}
+          />
+        )}
+
+        {/* Calculation rule badge for THIRD_PARTY_PAYMENT (Req 21.5) */}
+        {isThirdPartyTransfer && (
+          <div className="sm:col-span-2">
+            <dt className="text-xs font-medium text-muted-foreground">Calculation Rule</dt>
+            <dd className="mt-1 font-mono text-xs text-muted-foreground">
+              THIRD_PARTY_TRANSFER_0_10_PERCENT
+              {isInternalTransfer
+                ? ' — internal transfer (charge = ₦0)'
+                : ' — external transfer (charge = amount × 0.001)'}
+            </dd>
+          </div>
+        )}
+
+        {/* Partial pre-liquidation intermediate values */}
+        {isPartialPreLiquidation && (
+          <>
+            <Field label="Requested Payout" value={formatCurrency(snapInputs?.requested_payout ?? '0')} />
+            <Field
+              label="Remaining Principal (= Principal − Payout)"
+              value={formatCurrency(snapOutputs?.remaining_principal ?? '—')}
+            />
+            <Field
+              label="Rebooked Principal (= Remaining − Charge)"
+              value={formatCurrency(snapOutputs?.rebooked_principal ?? '—')}
+            />
+          </>
+        )}
+
         {/* Net amount — highlighted as primary output (Req 11.3) */}
         <div className="sm:col-span-2 flex items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2">
           <span className="text-xs font-medium text-muted-foreground">Net Amount</span>
