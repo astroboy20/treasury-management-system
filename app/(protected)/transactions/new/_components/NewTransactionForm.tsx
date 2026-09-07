@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Search, X } from 'lucide-react'
 
 import {
   CreateTransactionSchema,
   type CreateTransactionInput,
   type TransactionType,
 } from '@/lib/schemas/transaction.schema'
-import { createTransactionAction } from '@/lib/actions/transaction.actions'
+import { createTransactionAction, createReversalAction, searchTransactionsByReferenceAction } from '@/lib/actions/transaction.actions'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,6 +70,13 @@ const ANNIVERSARY_SCENARIO_OPTIONS = [
   { value: 'ANNIVERSARY_90', label: '90-Day (ANNIVERSARY_90)' },
 ] as const
 
+// Scenario codes for INTERNAL_TRANSFER (Req 22.1)
+const INTERNAL_TRANSFER_SCENARIO_OPTIONS = [
+  { value: 'SAVINGS_TO_PERSONAL',           label: 'Savings → Personal' },
+  { value: 'PERSONAL_TO_COMMERCIAL_PAPER',  label: 'Personal → Commercial Paper' },
+  { value: 'PERSONAL_TO_CALL_PLACEMENT',    label: 'Personal → Call Placement' },
+] as const
+
 const ACCOUNT_TYPE_OPTIONS = [
   { value: 'SAVINGS',          label: 'Savings' },
   { value: 'PERSONAL',         label: 'Personal' },
@@ -83,6 +90,9 @@ const ROLLOVER_TYPES: TransactionType[] = ['ROLLOVER']
 
 /** Transaction types that require an anniversary scenario code */
 const ANNIVERSARY_TYPES: TransactionType[] = ['ANNIVERSARY_PAYMENT']
+
+/** Transaction types that require an internal transfer scenario code (Req 22.1) */
+const INTERNAL_TRANSFER_TYPES: TransactionType[] = ['INTERNAL_TRANSFER']
 
 /** Transaction types that require external payment beneficiary fields (Req 7.7) */
 const EXTERNAL_PAYMENT_TYPES: TransactionType[] = ['THIRD_PARTY_PAYMENT']
@@ -116,6 +126,17 @@ function Label({
       {required && <span className="ml-0.5 text-destructive" aria-hidden>*</span>}
     </label>
   )
+}
+
+// ─── Original Transaction result type ────────────────────────────────────────
+
+interface OriginalTransactionOption {
+  id: string
+  transaction_reference: string
+  transaction_type: string
+  status: string
+  requested_amount: string
+  customer_name: string | null
 }
 
 // ─── Customer Combobox ────────────────────────────────────────────────────────
@@ -207,6 +228,161 @@ function CustomerCombobox({
   )
 }
 
+// ─── OriginalTransactionCombobox ─────────────────────────────────────────────
+
+/**
+ * Searchable combobox for selecting the original transaction to reverse.
+ * Queries the server as the user types (min 2 chars) and shows matching
+ * transactions that are eligible for reversal (Req 25.5).
+ */
+function OriginalTransactionCombobox({
+  value,
+  onChange,
+  error,
+}: {
+  value: string
+  onChange: (id: string, reference: string) => void
+  error?: string
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [options, setOptions] = useState<OriginalTransactionOption[]>([])
+  const [loading, setLoading] = useState(false)
+  const [selectedLabel, setSelectedLabel] = useState('')
+
+  // Debounced search
+  useEffect(() => {
+    if (query.trim().length < 2) {
+      setOptions([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setLoading(true)
+      const result = await searchTransactionsByReferenceAction(query.trim())
+      if (result.success && result.data) {
+        setOptions(result.data)
+      }
+      setLoading(false)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  // Clear options when field is cleared
+  useEffect(() => {
+    if (!value) {
+      setSelectedLabel('')
+      setOptions([])
+    }
+  }, [value])
+
+  function handleSelect(opt: OriginalTransactionOption) {
+    onChange(opt.id, opt.transaction_reference)
+    setSelectedLabel(`${opt.transaction_reference} — ${opt.customer_name ?? opt.transaction_type}`)
+    setQuery('')
+    setOpen(false)
+  }
+
+  function handleClear() {
+    onChange('', '')
+    setSelectedLabel('')
+    setQuery('')
+    setOptions([])
+  }
+
+  return (
+    <div className="relative">
+      {value && selectedLabel ? (
+        <div
+          className={`flex h-10 items-center justify-between rounded-lg border bg-background px-3 text-sm ${
+            error ? 'border-destructive' : 'border-input'
+          }`}
+        >
+          <span className="font-mono text-xs tabular-nums text-foreground">{selectedLabel}</span>
+          <button
+            type="button"
+            onClick={handleClear}
+            className="ml-2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus:outline-none"
+            aria-label="Clear selection"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <input
+            type="text"
+            autoComplete="off"
+            placeholder="Search by reference, e.g. TRX-00001…"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setOpen(true)
+            }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            className={`h-10 w-full rounded-lg border bg-background py-0 pl-9 pr-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+              error ? 'border-destructive' : 'border-input'
+            }`}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+          />
+          {loading && (
+            <Loader2 className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground" aria-hidden />
+          )}
+        </div>
+      )}
+
+      {open && !value && (
+        <>
+          {options.length > 0 && (
+            <ul
+              role="listbox"
+              className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-background shadow-md"
+            >
+              {options.map((opt) => (
+                <li
+                  key={opt.id}
+                  role="option"
+                  aria-selected={opt.id === value}
+                  onMouseDown={() => handleSelect(opt)}
+                  className="flex cursor-pointer items-start justify-between gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-muted"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-mono text-xs font-medium tabular-nums">
+                      {opt.transaction_reference}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {opt.customer_name ?? '—'} · {opt.transaction_type.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end">
+                    <span className="text-xs tabular-nums text-foreground">
+                      ₦{Number(opt.requested_amount).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{opt.status.replace(/_/g, ' ')}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!loading && query.trim().length >= 2 && options.length === 0 && (
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground shadow-md">
+              No eligible transactions found for &ldquo;{query}&rdquo;.
+            </div>
+          )}
+          {query.trim().length > 0 && query.trim().length < 2 && (
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground shadow-md">
+              Type at least 2 characters to search…
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── Main form component ──────────────────────────────────────────────────────
 
 export default function NewTransactionForm({ customers }: Props) {
@@ -218,7 +394,14 @@ export default function NewTransactionForm({ customers }: Props) {
   const [loadingInvestments, setLoadingInvestments] = useState(false)
 
   // Internal/External toggle for THIRD_PARTY_PAYMENT (Req 21.1, 21.3)
-  const [isInternalTransfer, setIsInternalTransfer] = useState(false)
+  const [isInternalTransferPayment, setIsInternalTransferPayment] = useState(false)
+
+  // Reversal — selected original transaction state (Req 22.4, 25.1)
+  const [originalTransactionId, setOriginalTransactionId] = useState('')
+  const [originalTransactionRef, setOriginalTransactionRef] = useState('')
+  const [reversalReason, setReversalReason] = useState('')
+  const [reversalReasonError, setReversalReasonError] = useState('')
+  const [originalTxError, setOriginalTxError] = useState('')
 
   const {
     register,
@@ -245,8 +428,11 @@ export default function NewTransactionForm({ customers }: Props) {
   const requestedAmountValue = watch('requestedAmount')
   const isRollover           = ROLLOVER_TYPES.includes(selectedType)
   const isAnniversary        = ANNIVERSARY_TYPES.includes(selectedType)
+  const isInternalTransfer   = INTERNAL_TRANSFER_TYPES.includes(selectedType)
   const isExternalPayment    = EXTERNAL_PAYMENT_TYPES.includes(selectedType)
+  const isReversal           = selectedType === 'REVERSAL'
   const isPartialPrincipal   = isRollover && selectedScenarioCode === 'PARTIAL_PRINCIPAL'
+  const needsScenario        = isRollover || isAnniversary || isInternalTransfer
 
   // Fetch investments when customer changes
   useEffect(() => {
@@ -271,16 +457,16 @@ export default function NewTransactionForm({ customers }: Props) {
   useEffect(() => {
     if (!isExternalPayment) {
       setValue('paymentInstruction', undefined)
-      setIsInternalTransfer(false)
+      setIsInternalTransferPayment(false)
     }
   }, [isExternalPayment, setValue])
 
   // Clear scenario code when type no longer requires it
   useEffect(() => {
-    if (!isRollover && !isAnniversary) {
+    if (!isRollover && !isAnniversary && !isInternalTransfer) {
       setValue('scenarioCode', undefined)
     }
-  }, [isRollover, isAnniversary, setValue])
+  }, [isRollover, isAnniversary, isInternalTransfer, setValue])
 
   // Clear requestedPayout when not a PARTIAL_PRINCIPAL rollover
   useEffect(() => {
@@ -289,9 +475,58 @@ export default function NewTransactionForm({ customers }: Props) {
     }
   }, [isPartialPrincipal, setValue])
 
+  // Clear reversal state when type changes away from REVERSAL
+  useEffect(() => {
+    if (!isReversal) {
+      setOriginalTransactionId('')
+      setOriginalTransactionRef('')
+      setReversalReason('')
+      setReversalReasonError('')
+      setOriginalTxError('')
+    }
+  }, [isReversal])
+
   const busy = isSubmitting || isPending
 
   async function onSubmit(data: CreateTransactionInput) {
+    // REVERSAL: handled via a dedicated server action (Req 25.1, 25.2)
+    if (isReversal) {
+      startTransition(async () => {
+        let hasError = false
+
+        if (!originalTransactionId) {
+          setOriginalTxError('Please select the original transaction to reverse.')
+          hasError = true
+        } else {
+          setOriginalTxError('')
+        }
+
+        if (!reversalReason.trim()) {
+          setReversalReasonError('Reversal reason is required (Req 25.2).')
+          hasError = true
+        } else {
+          setReversalReasonError('')
+        }
+
+        if (hasError) return
+
+        const result = await createReversalAction({
+          originalTransactionId,
+          reversalReason: reversalReason.trim(),
+        })
+
+        if (!result.success) {
+          toast.error(result.error ?? 'Failed to create reversal transaction.')
+          return
+        }
+
+        toast.success(`Reversal ${result.data!.reference} created successfully.`)
+        router.push(`/transactions/${result.data!.transactionId}`)
+      })
+      return
+    }
+
+    // Standard transaction creation
     startTransition(async () => {
       const result = await createTransactionAction(data)
 
@@ -406,10 +641,10 @@ export default function NewTransactionForm({ customers }: Props) {
             <FieldError message={errors.transactionType?.message} />
           </div>
 
-          {/* Scenario code — visible only for ROLLOVER or ANNIVERSARY_PAYMENT */}
-          <div className={isRollover || isAnniversary ? 'block' : 'hidden'} aria-hidden={!isRollover && !isAnniversary}>
-            <Label htmlFor="scenarioCode" required={isRollover || isAnniversary}>
-              {isAnniversary ? 'Anniversary Frequency' : 'Rollover Scenario'}
+          {/* Scenario code — visible only for ROLLOVER, ANNIVERSARY_PAYMENT, or INTERNAL_TRANSFER */}
+          <div className={needsScenario ? 'block' : 'hidden'} aria-hidden={!needsScenario}>
+            <Label htmlFor="scenarioCode" required={needsScenario}>
+              {isAnniversary ? 'Anniversary Frequency' : isInternalTransfer ? 'Transfer Direction' : 'Rollover Scenario'}
             </Label>
             <div className="mt-2">
               <select
@@ -419,9 +654,17 @@ export default function NewTransactionForm({ customers }: Props) {
                   errors.scenarioCode ? 'border-destructive' : 'border-input'
                 }`}
               >
-                <option value="">{isAnniversary ? 'Select frequency…' : 'Select scenario…'}</option>
+                <option value="">
+                  {isAnniversary ? 'Select frequency…' : isInternalTransfer ? 'Select transfer direction…' : 'Select scenario…'}
+                </option>
                 {isAnniversary
                   ? ANNIVERSARY_SCENARIO_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))
+                  : isInternalTransfer
+                  ? INTERNAL_TRANSFER_SCENARIO_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
                       </option>
@@ -570,14 +813,100 @@ export default function NewTransactionForm({ customers }: Props) {
         })()
       )}
 
+      {/* ── Section: Reversal Details — conditionally rendered for REVERSAL ── */}
+      {isReversal && (
+        <fieldset className="rounded-xl border border-border bg-background p-6">
+          <legend className="px-1 text-sm font-semibold text-foreground">
+            Reversal Details
+          </legend>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Select the original transaction to reverse and provide a mandatory reason (Req 25.2).
+            The original transaction is not modified — a new REVERSAL transaction is created
+            that references it (Req 25.1).
+          </p>
+
+          <div className="mt-5 space-y-5">
+            {/* Original transaction search combobox (Req 22.4, 25.5) */}
+            <div>
+              <Label htmlFor="original-tx-search" required>
+                Original Transaction
+              </Label>
+              <p className="mt-1 mb-2 text-xs text-muted-foreground">
+                Only transactions that are eligible for reversal are shown (DRAFT and CANCELLED
+                are excluded; already-reversed transactions are excluded — Req 25.5).
+              </p>
+              <OriginalTransactionCombobox
+                value={originalTransactionId}
+                onChange={(id, ref) => {
+                  setOriginalTransactionId(id)
+                  setOriginalTransactionRef(ref)
+                  if (id) setOriginalTxError('')
+                }}
+                error={originalTxError}
+              />
+              {originalTxError && (
+                <p className="mt-1.5 text-xs text-destructive" role="alert">
+                  {originalTxError}
+                </p>
+              )}
+            </div>
+
+            {/* Reversal reason (required — Req 25.2) */}
+            <div>
+              <Label htmlFor="reversalReason" required>
+                Reversal Reason
+              </Label>
+              <div className="mt-2">
+                <textarea
+                  id="reversalReason"
+                  rows={3}
+                  placeholder="Describe why this transaction must be reversed…"
+                  value={reversalReason}
+                  onChange={(e) => {
+                    setReversalReason(e.target.value)
+                    if (e.target.value.trim()) setReversalReasonError('')
+                  }}
+                  className={`w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                    reversalReasonError ? 'border-destructive' : 'border-input'
+                  }`}
+                />
+              </div>
+              {reversalReasonError && (
+                <p className="mt-1.5 text-xs text-destructive" role="alert">
+                  {reversalReasonError}
+                </p>
+              )}
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Required. This reason is recorded in the audit trail on both the reversal and original
+                transaction (Req 25.4).
+              </p>
+            </div>
+
+            {/* Informational notice */}
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+              <p className="text-xs font-medium text-amber-700">
+                What happens when a REVERSAL is created:
+              </p>
+              <ul className="mt-1.5 list-inside list-disc space-y-1 text-xs text-amber-700/80">
+                <li>A new REVERSAL transaction is opened at Step 1 (INSTRUCTION_RECEIVED)</li>
+                <li>The original transaction is <strong>not changed or deleted</strong></li>
+                <li>The reversal passes through all 6 workflow steps + 5-stage approval chain</li>
+                <li>On Operations execution, the Eazybankz posting for the original transaction is reversed</li>
+                <li>A REVERSAL_CREATED audit event is written on both transactions (Req 25.4)</li>
+              </ul>
+            </div>
+          </div>
+        </fieldset>
+      )}
+
       {/* ── Section: Payment Instruction — conditionally rendered for THIRD_PARTY_PAYMENT ── */}
       {isExternalPayment && (
         <fieldset className="rounded-xl border border-border bg-background p-6">
           <legend className="px-1 text-sm font-semibold text-foreground">
-            {isInternalTransfer ? 'Internal Transfer — Intra-company transfer (no charge)' : 'External Payment Beneficiary'}
+            {isInternalTransferPayment ? 'Internal Transfer — Intra-company transfer (no charge)' : 'External Payment Beneficiary'}
           </legend>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isInternalTransfer
+            {isInternalTransferPayment
               ? 'Internal transfer — Transfer Charge: ₦0 (no charge for intra-company transfers)'
               : 'Required for third-party external payments. All fields below are mandatory.'}
           </p>
@@ -587,15 +916,15 @@ export default function NewTransactionForm({ customers }: Props) {
             <button
               type="button"
               role="radio"
-              aria-checked={!isInternalTransfer}
+              aria-checked={!isInternalTransferPayment}
               onClick={() => {
-                setIsInternalTransfer(false)
+                setIsInternalTransferPayment(false)
                 setValue('paymentInstruction.isInternal', false, { shouldValidate: true })
                 // Clear the internal-only field if switching back to external
                 setValue('paymentInstruction.accountNumber', '', { shouldValidate: false })
               }}
               className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
-                !isInternalTransfer
+                !isInternalTransferPayment
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-input bg-background text-muted-foreground hover:bg-muted'
               }`}
@@ -605,9 +934,9 @@ export default function NewTransactionForm({ customers }: Props) {
             <button
               type="button"
               role="radio"
-              aria-checked={isInternalTransfer}
+              aria-checked={isInternalTransferPayment}
               onClick={() => {
-                setIsInternalTransfer(true)
+                setIsInternalTransferPayment(true)
                 setValue('paymentInstruction.isInternal', true, { shouldValidate: true })
                 // Clear external-only fields when switching to internal
                 setValue('paymentInstruction.beneficiaryName', '', { shouldValidate: false })
@@ -615,7 +944,7 @@ export default function NewTransactionForm({ customers }: Props) {
                 setValue('paymentInstruction.accountType', undefined, { shouldValidate: false })
               }}
               className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
-                isInternalTransfer
+                isInternalTransferPayment
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-input bg-background text-muted-foreground hover:bg-muted'
               }`}

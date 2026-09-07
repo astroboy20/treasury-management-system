@@ -78,6 +78,7 @@ export async function prepareVoucherAction(
       transaction_type,
       scenario_code,
       requested_amount,
+      customer_id,
       investment_verifications (
         principal,
         accrued_interest,
@@ -101,14 +102,17 @@ export async function prepareVoucherAction(
     ? txData.investment_verifications[0]
     : txData.investment_verifications
 
-  if (!investmentSnapshot) {
+  const txType: string = txData.transaction_type
+
+  // INFLOW transactions create a NEW investment — they have no existing investment to verify.
+  // Step 4 investment verification is skipped for INFLOW (Req 23.1).
+  if (!investmentSnapshot && txType !== 'INFLOW') {
     return {
       success: false,
       error: 'Investment verification snapshot not found. Complete Step 4 first.',
     }
   }
 
-  const txType: string = txData.transaction_type
   const scenarioCode: string | null = txData.scenario_code ?? null
 
   // 5b. For THIRD_PARTY_PAYMENT: look up payment_instructions row to resolve isInternal.
@@ -141,6 +145,7 @@ export async function prepareVoucherAction(
       calculateThirdPartyCharge,
       calculateAnniversaryPayment,
       calculateMaturityTermination,
+      calculateInternalTransfer,
     } = await import('@/lib/services/calculation.service')
 
     switch (txType) {
@@ -233,9 +238,55 @@ export async function prepareVoucherAction(
         break
       }
 
-      // INFLOW, INTERNAL_TRANSFER, REVERSAL, SAVINGS_FUNDS_OUT,
-      // CALL_FUNDS_OUT, CMS_FUNDS_OUT — no calculation engine call required;
-      // the RPC handles any internal arithmetic. Snapshot remains null.
+      // INFLOW: build a lightweight snapshot from the FUNDS_IN voucher form fields (Req 23.1).
+      // INFLOW creates a NEW investment — no existing investment to verify (Step 4 is skipped).
+      // Customer name is loaded here and stored in the snapshot so FundsInVoucherContent can display it.
+      case 'INFLOW': {
+        const inflowInput = parsed.data as import('@/lib/schemas/voucher.schema').FundsInVoucherInput
+
+        // Load customer name for the snapshot (Req 23.1)
+        const customerId = (txData as Record<string, unknown>).customer_id as string | undefined
+        let customerName = ''
+        if (customerId) {
+          const { data: customerData } = await supabase
+            .from('customers')
+            .select('name')
+            .eq('id', customerId)
+            .maybeSingle()
+          customerName = customerData?.name ?? ''
+        }
+
+        calculationSnapshot = {
+          rule: 'FUNDS_IN' as import('@/lib/services/calculation.service').CalculationRule,
+          inputs: {
+            customer_name: customerName,
+            amount: inflowInput.amount,
+            rate: inflowInput.rate,
+            tenor: String(inflowInput.tenor),
+            effective_date: inflowInput.effectiveDate,
+            maturity_date: inflowInput.maturityDate,
+          },
+          outputs: {
+            net_amount: inflowInput.amount,
+          },
+          calculated_at: new Date().toISOString(),
+        }
+        break
+      }
+
+      // REVERSAL, SAVINGS_FUNDS_OUT, CALL_FUNDS_OUT, CMS_FUNDS_OUT —
+      // no calculation engine call required; the RPC handles any internal
+      // arithmetic. Snapshot remains null.
+      //
+      // INTERNAL_TRANSFER: build a no-charge snapshot (transfer_charge = 0,
+      // is_internal = true). Balance check is enforced by the server action (step 6b)
+      // and by the prepare_voucher RPC. (Req 22.1, 22.2)
+      case 'INTERNAL_TRANSFER': {
+        const transferAmount = String(txData.requested_amount ?? investmentSnapshot.available_amount)
+        calculationSnapshot = calculateInternalTransfer(transferAmount, scenarioCode ?? undefined)
+        break
+      }
+
       default:
         break
     }
@@ -243,6 +294,31 @@ export async function prepareVoucherAction(
     const message =
       calcError instanceof Error ? calcError.message : 'Calculation failed. Please try again.'
     return { success: false, error: message }
+  }
+
+  // 6b. INTERNAL_TRANSFER: server-side balance validation (Req 22.2)
+  //     Verify available balance ≥ requested_amount before allowing Transfer Slip
+  //     voucher preparation. The RPC (migration 007) also enforces this, but we
+  //     surface a readable TypeScript error here so the UI can show the specific values.
+  if (txType === 'INTERNAL_TRANSFER') {
+    // Prefer the investment verification snapshot's available_amount (confirmed in Step 4)
+    const availableBalance = investmentSnapshot?.available_amount ?? null
+    const requestedAmount = txData.requested_amount ?? null
+
+    if (availableBalance !== null && requestedAmount !== null) {
+      const available = Number(availableBalance)
+      const requested = Number(requestedAmount)
+
+      if (!isNaN(available) && !isNaN(requested) && available < requested) {
+        return {
+          success: false,
+          error:
+            `Insufficient balance: the available balance (₦${Number(available).toLocaleString('en-NG', { minimumFractionDigits: 2 })}) ` +
+            `is less than the requested transfer amount (₦${Number(requested).toLocaleString('en-NG', { minimumFractionDigits: 2 })}). ` +
+            `Verify the account balance in Step 4 before preparing the voucher. (Req 22.2)`,
+        }
+      }
+    }
   }
 
   // 7. Validate that the submitted voucherType matches the server-resolved type (Req 11.2)
@@ -275,7 +351,14 @@ export async function prepareVoucherAction(
     voucherData.calculation_snapshot = calculationSnapshot
   }
 
-  // 8a. For THIRD_PARTY_PAYMENT external transfers: validate all 6 PI fields
+  // 8b. For INFLOW: map 'amount' → 'net_amount' so the RPC correctly populates
+  //     the voucher's net_amount column from the FUNDS_IN form data (Req 23.1).
+  if (txType === 'INFLOW' && parsed.data.voucherType === 'FUNDS_IN') {
+    const inflowData = parsed.data as import('@/lib/schemas/voucher.schema').FundsInVoucherInput
+    voucherData.net_amount = inflowData.amount
+  }
+
+  // 8c. For THIRD_PARTY_PAYMENT external transfers: validate all 6 PI fields
   //     (Req 36.2, 21.4) — server-side re-enforcement beyond Zod schema.
   if (txType === 'THIRD_PARTY_PAYMENT') {
     const piData = paymentInstruction as Record<string, unknown> | null

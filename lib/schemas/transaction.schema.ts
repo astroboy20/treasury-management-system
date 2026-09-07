@@ -29,6 +29,10 @@ export const ScenarioCodeEnum = z.enum([
   'ANNIVERSARY_30',
   'ANNIVERSARY_60',
   'ANNIVERSARY_90',
+  // Internal transfer scenario codes (Req 22.1)
+  'SAVINGS_TO_PERSONAL',
+  'PERSONAL_TO_COMMERCIAL_PAPER',
+  'PERSONAL_TO_CALL_PLACEMENT',
 ])
 export type ScenarioCode = z.infer<typeof ScenarioCodeEnum>
 
@@ -149,6 +153,15 @@ export const CreateTransactionSchema = z
         path: ['scenarioCode'],
         message:
           'Anniversary payments only support frequencies of 30, 60, or 90 days (ANNIVERSARY_30, ANNIVERSARY_60, ANNIVERSARY_90).',
+      })
+    }
+
+    // INTERNAL_TRANSFER transactions must supply a scenario code
+    if (data.transactionType === 'INTERNAL_TRANSFER' && !data.scenarioCode) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['scenarioCode'],
+        message: 'Scenario code is required for internal transfer transactions.',
       })
     }
 

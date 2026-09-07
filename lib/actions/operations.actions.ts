@@ -90,7 +90,7 @@ export async function executeTransactionAction(
     // Load the transaction to check its type and related data
     const { data: txData } = await supabase
       .from('treasury_transactions')
-      .select('transaction_type, customer_id, investment_id')
+      .select('transaction_type, customer_id, investment_id, scenario_code')
       .eq('id', transactionId)
       .single()
 
@@ -204,6 +204,133 @@ export async function executeTransactionAction(
             break
           }
 
+          // ── REVERSAL: reverse the original Eazybankz posting (Req 25.3) ─────
+          //    Load the original transaction's investment external_reference and
+          //    call reverseTransaction() on the mock/real adapter.
+          case 'REVERSAL': {
+            // Load the reversal transaction's original_transaction_id
+            const { data: reversalTx } = await supabase
+              .from('treasury_transactions')
+              .select('original_transaction_id, purpose')
+              .eq('id', transactionId)
+              .single()
+
+            if (reversalTx?.original_transaction_id) {
+              // Load the original transaction's linked investment
+              const { data: originalTx } = await supabase
+                .from('treasury_transactions')
+                .select('investment_id, purpose')
+                .eq('id', reversalTx.original_transaction_id)
+                .single()
+
+              if (originalTx?.investment_id) {
+                const { data: investment } = await supabase
+                  .from('investments')
+                  .select('external_reference')
+                  .eq('id', originalTx.investment_id)
+                  .maybeSingle()
+
+                if (investment?.external_reference) {
+                  await eazybankzAdapter.reverseTransaction(
+                    investment.external_reference,
+                    (reversalTx.purpose as string | null) ?? 'Reversal',
+                  )
+                }
+              }
+            }
+            break
+          }
+
+          // ── INFLOW: book the new investment in Eazybankz mirror (Req 23.2) ────────
+          //    INFLOW creates a brand-new investment. The voucher snapshot holds all
+          //    fields (amount, rate, tenor, effectiveDate, maturityDate) captured at
+          //    Step 5. On successful execution, the new investment is written to the
+          //    mirror so Treasury can verify it exists before confirming COMPLETED (Req 23.3).
+          case 'INFLOW': {
+            // Load the FUNDS_IN voucher to get the investment details entered at Step 5
+            const { data: inflowVoucher } = await supabase
+              .from('vouchers')
+              .select('calculation_snapshot, net_amount, transfer_date')
+              .eq('transaction_id', transactionId)
+              .maybeSingle()
+
+            if (inflowVoucher) {
+              const snap = inflowVoucher.calculation_snapshot as Record<string, unknown> | null
+              const inputs = snap?.inputs as Record<string, string> | undefined
+
+              if (inputs) {
+                const externalRef = await eazybankzAdapter.createInvestment({
+                  customerId: txData.customer_id,
+                  principal: inputs.amount ?? String(inflowVoucher.net_amount ?? '0'),
+                  interestRate: inputs.rate ?? '0',
+                  tenorDays: parseInt(inputs.tenor ?? '0', 10),
+                  effectiveDate:
+                    inputs.effective_date ??
+                    (inflowVoucher.transfer_date as string | null) ??
+                    new Date().toISOString().slice(0, 10),
+                  maturityDate:
+                    inputs.maturity_date ??
+                    new Date().toISOString().slice(0, 10),
+                  productType: 'FIXED_DEPOSIT',
+                  sourceTransactionId: transactionId,
+                })
+
+                // Store the new external_reference on the investments table so
+                // confirmTreasuryCompletionAction can verify it via the adapter (Req 23.3).
+                // We upsert a new investments row linked to this customer with the
+                // Eazybankz-assigned reference.
+                await supabase.from('investments').update({
+                  external_reference: externalRef.externalReference,
+                  status: 'ACTIVE',
+                }).eq('id', txData.investment_id ?? '').then(() => {
+                  // If no existing investment_id, the new row was created by createInvestment()
+                  // (mock adapter inserts the row already). Nothing further to do.
+                })
+              }
+            }
+            break
+          }
+
+          // ── INTERNAL_TRANSFER: book destination investment for applicable scenarios ─
+          //    PERSONAL_TO_COMMERCIAL_PAPER → createInvestment (Req 22.3)
+          //    PERSONAL_TO_CALL_PLACEMENT   → createInvestment (Req 22.3)
+          //    SAVINGS_TO_PERSONAL          → pure account transfer; no new investment to book
+          case 'INTERNAL_TRANSFER': {
+            const scenarioCode = (txData as { scenario_code?: string | null }).scenario_code ?? null
+
+            if (
+              scenarioCode === 'PERSONAL_TO_COMMERCIAL_PAPER' ||
+              scenarioCode === 'PERSONAL_TO_CALL_PLACEMENT'
+            ) {
+              // Load the voucher to get the transfer amount and related details
+              const { data: voucher } = await supabase
+                .from('vouchers')
+                .select('net_amount, transfer_date')
+                .eq('transaction_id', transactionId)
+                .maybeSingle()
+
+              if (voucher) {
+                const productType =
+                  scenarioCode === 'PERSONAL_TO_COMMERCIAL_PAPER'
+                    ? 'COMMERCIAL_PAPER'
+                    : 'CALL'
+
+                await eazybankzAdapter.createInvestment({
+                  customerId: txData.customer_id,
+                  principal: String(voucher.net_amount),
+                  interestRate: '0',        // Rate is set when the investment is formally booked
+                  tenorDays: 0,             // Open-ended for CALL; set at formal booking for CP
+                  effectiveDate: (voucher.transfer_date as string | null) ?? new Date().toISOString().slice(0, 10),
+                  maturityDate: (voucher.transfer_date as string | null) ?? new Date().toISOString().slice(0, 10),
+                  productType,
+                  sourceTransactionId: transactionId,
+                })
+              }
+            }
+            // SAVINGS_TO_PERSONAL: no new investment to book — pure account transfer
+            break
+          }
+
           default:
             // Other transaction types are handled in later phases (4.5).
             break
@@ -270,6 +397,57 @@ export async function confirmTreasuryCompletionAction(
   }
 
   const supabase = await createClient()
+
+  // Req 23.3: For INFLOW transactions, verify the new investment was successfully created
+  // in the Eazybankz mirror before marking the transaction COMPLETED.
+  // The mock adapter stores the investment in the local `investments` table;
+  // we use the adapter's getInvestment() to confirm it exists.
+  const { data: txCheck } = await supabase
+    .from('treasury_transactions')
+    .select('transaction_type, investment_id')
+    .eq('id', transactionId)
+    .single()
+
+  if (txCheck?.transaction_type === 'INFLOW') {
+    // For INFLOW the mock adapter writes a new investments row with an EZ-ROLLOVER-* reference.
+    // Look up the most recent investment created by this transaction's execution
+    // (identified by source_transaction_id stored in the mock's external_reference prefix).
+    const sourcePrefix = `EZ-ROLLOVER-${transactionId.slice(0, 8).toUpperCase()}`
+    const { data: newInvestment } = await supabase
+      .from('investments')
+      .select('external_reference, status')
+      .ilike('external_reference', `${sourcePrefix}%`)
+      .maybeSingle()
+
+    if (!newInvestment) {
+      // As a secondary check, attempt via the adapter directly if we have an investment_id
+      let verifiedViaAdapter = false
+      if (txCheck.investment_id) {
+        const { data: invRecord } = await supabase
+          .from('investments')
+          .select('external_reference')
+          .eq('id', txCheck.investment_id)
+          .maybeSingle()
+
+        if (invRecord?.external_reference) {
+          const { eazybankzAdapter } = await import('@/lib/services/eazybankz')
+          const adapterInvestment = await eazybankzAdapter.getInvestment(invRecord.external_reference)
+          verifiedViaAdapter = adapterInvestment !== null
+        }
+      }
+
+      if (!verifiedViaAdapter) {
+        return {
+          success: false,
+          error:
+            'Cannot confirm completion: the new investment record was not found in the Eazybankz mirror. ' +
+            'Verify that Operations execution completed successfully and the investment was booked. (Req 23.3)',
+        }
+      }
+    }
+    // Investment exists — proceed to completion confirmation
+  }
+
   const { data, error } = await supabase.rpc('confirm_treasury_completion', {
     p_transaction_id: transactionId,
   })

@@ -17,6 +17,7 @@ import type {
   CreateInvestmentResult,
   UpdateInvestmentInput,
   UpdateInvestmentResult,
+  ReverseTransactionResult,
 } from './adapter.interface'
 import { createClient } from '@/lib/supabase/server'
 
@@ -149,6 +150,46 @@ class MockEazybankzAdapter implements EazybankzAdapter {
     return {
       externalReference,
       status: (updated?.status as string) ?? (data.status ?? 'UNKNOWN'),
+    }
+  }
+
+  /**
+   * Mock implementation of reverseTransaction (Req 25.3).
+   *
+   * Phase 1–5: marks the investment in the local `investments` table as
+   * ROLLED_OVER (a surrogate for "reversed") so the mirror record reflects the
+   * reversal.  In Phase 6 this will be replaced by a live Eazybankz API call.
+   *
+   * Returns a `reversalId` in the format EZ-REVERSAL-<uuid-prefix>.
+   */
+  async reverseTransaction(
+    originalExternalReference: string,
+    reason: string,
+  ): Promise<ReverseTransactionResult> {
+    if (!reason || reason.trim() === '') {
+      throw new Error('MockEazybankzAdapter.reverseTransaction: reason is required')
+    }
+
+    const supabase = await createClient()
+
+    // Mark the original investment as ROLLED_OVER (proxy for "reversed" in mock)
+    const { error } = await supabase
+      .from('investments')
+      .update({ status: 'ROLLED_OVER', updated_at: new Date().toISOString() })
+      .eq('external_reference', originalExternalReference)
+
+    if (error) {
+      throw new Error(
+        `MockEazybankzAdapter.reverseTransaction failed: ${error.message ?? error.code ?? 'unknown'}`,
+      )
+    }
+
+    const reversalId = `EZ-REVERSAL-${originalExternalReference.slice(0, 8).toUpperCase()}-${Date.now()}`
+
+    return {
+      reversalId,
+      originalReference: originalExternalReference,
+      status: 'REVERSED',
     }
   }
 }

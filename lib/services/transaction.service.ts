@@ -52,6 +52,7 @@ export interface TransactionWorkspace {
     completed_at: string | null
     customer_id: string
     investment_id: string | null
+    original_transaction_id: string | null
   }
   customer: {
     id: string
@@ -315,7 +316,7 @@ export async function getTransactionWorkspace(
           id, transaction_reference, transaction_type, scenario_code, status,
           currency, requested_amount, approved_amount, purpose,
           source_instruction_type, sla_due_at, created_by, created_at,
-          updated_at, completed_at, customer_id, investment_id,
+          updated_at, completed_at, customer_id, investment_id, original_transaction_id,
           customers ( id, name, customer_number, registered_phone, status ),
           investments ( id, product_type, principal, interest_rate, accrued_interest,
             effective_date, maturity_date, outstanding_balance, available_amount,
@@ -448,6 +449,7 @@ export async function getTransactionWorkspace(
       completed_at: tx.completed_at as string | null,
       customer_id: tx.customer_id as string,
       investment_id: tx.investment_id as string | null,
+      original_transaction_id: tx.original_transaction_id as string | null,
     },
     customer: normaliseRelated(tx.customers),
     investment: normaliseRelated(tx.investments),

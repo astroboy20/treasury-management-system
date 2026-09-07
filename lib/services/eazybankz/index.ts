@@ -15,4 +15,5 @@ export type {
   CreateInvestmentResult,
   UpdateInvestmentInput,
   UpdateInvestmentResult,
+  ReverseTransactionResult,
 } from './adapter.interface'

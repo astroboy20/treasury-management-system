@@ -54,6 +54,8 @@ export type CalculationRule =
   | 'ROLLOVER_INTEREST_ONLY'
   | 'MATURITY_TERMINATION'
   | 'ANNIVERSARY_PAYMENT'
+  | 'INTERNAL_TRANSFER_NO_CHARGE'
+  | 'FUNDS_IN'
 
 // ─── Rollover type union (matches PostgreSQL CHECK constraint) ────────────────
 
@@ -328,6 +330,51 @@ export async function calculateAnniversaryPayment(
   return {
     ...snapshot,
     interestDue: snapshot.outputs.interest_due,
+  }
+}
+
+/**
+ * Builds a calculation snapshot for an internal transfer (INTERNAL_TRANSFER).
+ *
+ * Rule: INTERNAL_TRANSFER_NO_CHARGE
+ *   transfer_charge = 0  (no fee for intra-company transfers — Req 22.1)
+ *   net_amount      = transfer_amount
+ *   is_internal     = true
+ *
+ * Unlike external third-party payments this does NOT call a PostgreSQL RPC —
+ * there is no arithmetic to perform. The snapshot is built in TypeScript and
+ * persisted in vouchers.calculation_snapshot for auditability.
+ *
+ * The balance check (available_balance ≥ requested_amount) is enforced:
+ *   1. In the TypeScript server action (`voucher.actions.ts`, step 6b — Req 22.2).
+ *   2. In the `prepare_voucher` PostgreSQL RPC (migration 003_rpc.sql — Req 22.2).
+ *
+ * @param transferAmount  NUMERIC string — the gross transfer amount.
+ * @param scenarioCode    The specific scenario (e.g. 'SAVINGS_TO_PERSONAL').
+ */
+export function calculateInternalTransfer(
+  transferAmount: string,
+  scenarioCode?: string,
+): CalculationSnapshot & { transferCharge: string; netAmount: string; isInternal: true } {
+  const snapshot: CalculationSnapshot = {
+    rule: 'INTERNAL_TRANSFER_NO_CHARGE' as CalculationRule,
+    inputs: {
+      transfer_amount: transferAmount,
+      is_internal: 'true',
+      ...(scenarioCode ? { scenario_code: scenarioCode } : {}),
+    },
+    outputs: {
+      transfer_charge: '0',
+      net_amount: transferAmount,
+    },
+    calculated_at: new Date().toISOString(),
+  }
+
+  return {
+    ...snapshot,
+    transferCharge: '0',
+    netAmount: transferAmount,
+    isInternal: true,
   }
 }
 

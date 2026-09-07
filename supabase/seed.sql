@@ -616,7 +616,9 @@ VALUES
   -- NEG-004: Customer confirmation failed / unreachable
   ('cc000004-0000-0000-0000-000000000040', 'CUSTOMER_NEG_004', 'Negative Test — Confirmation Failed',    '+2348099990004', 'ACTIVE'),
   -- NEG-005: Missing beneficiary data (external payment with no beneficiary)
-  ('cc000005-0000-0000-0000-000000000050', 'CUSTOMER_NEG_005', 'Negative Test — Missing Beneficiary',    '+2348099990005', 'ACTIVE')
+  ('cc000005-0000-0000-0000-000000000050', 'CUSTOMER_NEG_005', 'Negative Test — Missing Beneficiary',    '+2348099990005', 'ACTIVE'),
+  -- NEG-006: INTERNAL_TRANSFER savings balance insufficient for SAVINGS_TO_PERSONAL (Req 22.2)
+  ('cc000006-0000-0000-0000-000000000060', 'CUSTOMER_NEG_006', 'Negative Test — Internal Transfer Insufficient Balance', '+2348099990006', 'ACTIVE')
 ON CONFLICT (customer_number) DO NOTHING;
 
 -- Accounts for negative test customers
@@ -628,7 +630,11 @@ VALUES
   ('dd000002-0001-0000-0000-000000000020', 'cc000002-0000-0000-0000-000000000020', 'NEG-002-FD', 'PERSONAL', 'ACTIVE',       0.0000),
   ('dd000003-0001-0000-0000-000000000030', 'cc000003-0000-0000-0000-000000000030', 'NEG-003-FD', 'PERSONAL', 'ACTIVE', 3000000.0000),
   ('dd000004-0001-0000-0000-000000000040', 'cc000004-0000-0000-0000-000000000040', 'NEG-004-FD', 'PERSONAL', 'ACTIVE', 4000000.0000),
-  ('dd000005-0001-0000-0000-000000000050', 'cc000005-0000-0000-0000-000000000050', 'NEG-005-FD', 'PERSONAL', 'ACTIVE', 8000000.0000)
+  ('dd000005-0001-0000-0000-000000000050', 'cc000005-0000-0000-0000-000000000050', 'NEG-005-FD', 'PERSONAL', 'ACTIVE', 8000000.0000),
+  -- NEG-006: Savings account (source) with ₦500,000 balance — insufficient for a ₦1,000,000 SAVINGS_TO_PERSONAL transfer
+  ('dd000006-0001-0000-0000-000000000060', 'cc000006-0000-0000-0000-000000000060', 'NEG-006-SV', 'SAVINGS',  'ACTIVE',  500000.0000),
+  -- NEG-006: Personal account (destination)
+  ('dd000006-0002-0000-0000-000000000060', 'cc000006-0000-0000-0000-000000000060', 'NEG-006-PS', 'PERSONAL', 'ACTIVE',       0.0000)
 ON CONFLICT (account_number) DO NOTHING;
 
 -- Investments for negative test customers
@@ -698,6 +704,19 @@ VALUES
     '2026-05-01', '2026-11-01',
     8000000.0000, 8250000.0000,
     'ACTIVE'
+  ),
+  -- NEG-006: INTERNAL_TRANSFER Savings → Personal — savings balance ₦500,000 is insufficient
+  --          for a ₦1,000,000 SAVINGS_TO_PERSONAL transfer (triggers Req 22.2 balance check failure).
+  (
+    'ee000006-0000-0000-0000-000000000060',
+    'cc000006-0000-0000-0000-000000000060',
+    'dd000006-0001-0000-0000-000000000060',
+    'EZBK-NEG-006',
+    'FIXED_DEPOSIT',
+    0.0000, 0.000000, 0.0000,
+    '2026-01-01', NULL,
+    500000.0000, 500000.0000,   -- available_amount = ₦500,000 — less than ₦1,000,000 requested
+    'ACTIVE'
   )
 ON CONFLICT (id) DO NOTHING;
 
@@ -739,7 +758,7 @@ $$;
 -- Summary:
 --   Staff users        : 14 (7 scenario + 7 e2e)
 --   Role assignments   : 14
---   Test customers     : 18 (A–R) + 5 negative = 23 total
---   Investments seeded : 12 scenario (A–J, P, R) + 5 negative
+--   Test customers     : 18 (A–R) + 6 negative = 24 total
+--   Investments seeded : 12 scenario (A–J, P, R) + 6 negative
 --   Utility functions  : reset_e2e_transactions()
 -- ============================================================

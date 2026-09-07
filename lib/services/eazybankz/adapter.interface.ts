@@ -70,6 +70,17 @@ export interface UpdateInvestmentResult {
   status: string
 }
 
+// ─── Input / result shapes for reversing a transaction ───────────────────────
+
+export interface ReverseTransactionResult {
+  /** The reversal ID assigned by the mirror system. */
+  reversalId: string
+  /** The external reference of the original transaction that was reversed. */
+  originalReference: string
+  /** Confirmation status from the mirror. */
+  status: string
+}
+
 export interface EazybankzAdapter {
   /**
    * Fetch current investment data for a given external reference.
@@ -100,4 +111,19 @@ export interface EazybankzAdapter {
     externalReference: string,
     data: UpdateInvestmentInput,
   ): Promise<UpdateInvestmentResult>
+
+  /**
+   * Reverse the original Eazybankz posting for a REVERSAL transaction.
+   * Called on Operations execution for REVERSAL type (Req 25.3).
+   *
+   * @param originalExternalReference  The external_reference of the original posting to reverse.
+   * @param reason                     Non-empty reversal reason (Req 25.2).
+   *
+   * Phase 1–5: logs the reversal in-memory on the local investments table as a mock.
+   * Phase 6: calls the live Eazybankz API.
+   */
+  reverseTransaction(
+    originalExternalReference: string,
+    reason: string,
+  ): Promise<ReverseTransactionResult>
 }

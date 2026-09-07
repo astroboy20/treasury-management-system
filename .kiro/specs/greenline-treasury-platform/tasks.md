@@ -413,23 +413,23 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Render Payment Instruction block with Transfer Charge as `₦0`; pre-fill internal account details.
     - _Requirements: 21.1, 21.3, 36.3_
 
-  - [ ] 3.13 Transfer Slip — Savings → Personal
+  - [x] 3.13 Transfer Slip — Savings → Personal
     - Support `transaction_type: 'INTERNAL_TRANSFER'` with `scenario_code: 'SAVINGS_TO_PERSONAL'`.
     - Verify available balance ≥ requested amount server-side before allowing voucher preparation.
     - Generate `TRANSFER_SLIP` voucher.
     - _Requirements: 22.1, 22.2_
 
-  - [ ] 3.14 Transfer Slip — Personal → Commercial Paper
+  - [x] 3.14 Transfer Slip — Personal → Commercial Paper
     - Support `scenario_code: 'PERSONAL_TO_COMMERCIAL_PAPER'`.
     - On execution: `eazybankzAdapter.createInvestment()` to book Commercial Paper investment.
     - _Requirements: 22.1, 22.2, 22.3_
 
-  - [ ] 3.15 Transfer Slip — Personal → Call Placement
+  - [x] 3.15 Transfer Slip — Personal → Call Placement
     - Support `scenario_code: 'PERSONAL_TO_CALL_PLACEMENT'`.
     - On execution: `eazybankzAdapter.createInvestment()` to book Call Placement investment.
     - _Requirements: 22.1, 22.2, 22.3_
 
-  - [ ] 3.16 Reversal transaction
+  - [x] 3.16 Reversal transaction
     - Support `transaction_type: 'REVERSAL'`.
     - Creation form requires selection of original transaction (searchable by reference).
     - Call `supabase.rpc('create_reversal', { p_original_transaction_id, p_reversal_reason })`.

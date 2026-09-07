@@ -772,8 +772,19 @@ function RolloverSlipContent({ voucher }: { voucher: NonNullable<TransactionWork
 // ─── TRANSFER_SLIP voucher content (Req 11.6) ─────────────────────────────────
 
 function TransferSlipContent({ voucher }: { voucher: NonNullable<TransactionWorkspace['voucher']> }) {
+  const snap = voucher.calculation_snapshot as Record<string, unknown> | null
+  const scenarioCode = snap
+    ? ((snap.scenario_code ?? (snap.inputs as Record<string, unknown> | undefined)?.scenario_code) as string | undefined)
+    : undefined
+
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
+      {scenarioCode && (
+        <div className="sm:col-span-2">
+          <dt className="text-xs font-medium text-muted-foreground">Scenario</dt>
+          <dd className="mt-1 font-mono text-xs text-muted-foreground">{scenarioCode}</dd>
+        </div>
+      )}
       <Field label="Transfer Amount" value={formatCurrency(voucher.net_amount)} />
       <Field label="Transfer Date" value={voucher.transfer_date ?? '—'} />
       {voucher.remarks && (
@@ -1174,12 +1185,87 @@ function RolloverSlipForm({ disabled, register, errors, snapshot, scenarioCode }
   )
 }
 
-function TransferSlipForm({ disabled, register, errors }: VariantFormProps) {
+function TransferSlipForm({ disabled, register, errors, snapshot, scenarioCode, transactionType }: VariantFormProps) {
   const errs = errors as Record<string, { message?: string } | undefined>
+
+  const isSavingsToPersonal = scenarioCode === 'SAVINGS_TO_PERSONAL'
+  const isPersonalToCommercialPaper = scenarioCode === 'PERSONAL_TO_COMMERCIAL_PAPER'
+  const isPersonalToCallPlacement = scenarioCode === 'PERSONAL_TO_CALL_PLACEMENT'
+  const isReversal = transactionType === 'REVERSAL'
+
   return (
     <div className="space-y-4">
+      {/* REVERSAL-specific contextual notice (Req 22.1, 25.1–25.5) */}
+      {isReversal && (
+        <Alert>
+          <AlertTitle>Reversal Transaction — Transfer Slip</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span className="block">
+              This is a <strong>REVERSAL</strong> transaction. A <strong>Transfer Slip</strong> voucher is
+              generated automatically (Req 11.1, 11.6).
+            </span>
+            <span className="block">
+              The transfer amount should match the original transaction amount.
+              On Operations execution, <strong>eazybankzAdapter.reverseTransaction()</strong> will be
+              called to reverse the original Eazybankz posting (Req 25.3).
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              The original transaction is preserved — its status is not changed by this reversal (Req 25.1).
+              Confirm the transfer amount and date below before preparing the voucher.
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Scenario-specific contextual notice (Req 22.1) */}
+      {isSavingsToPersonal && (
+        <Alert>
+          <AlertTitle>Savings → Personal — Transfer Slip</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span className="block">
+              Scenario: <strong>SAVINGS_TO_PERSONAL</strong> — funds moving from a Savings account to a Personal account.
+            </span>
+            <span className="block">
+              Available balance (snapshot): <strong>{formatCurrency(snapshot.available_amount)}</strong>.
+              The transfer amount must not exceed this value (Req 22.2).
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              The server enforces the balance check before the voucher can be saved.
+              Voucher preparation will be rejected if the transfer amount exceeds available balance.
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+      {isPersonalToCommercialPaper && (
+        <Alert>
+          <AlertTitle>Personal → Commercial Paper — Transfer Slip</AlertTitle>
+          <AlertDescription>
+            Scenario: <strong>PERSONAL_TO_COMMERCIAL_PAPER</strong> — funds transferred to a Commercial Paper placement.
+            Available balance (snapshot): <strong>{formatCurrency(snapshot.available_amount)}</strong>.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isPersonalToCallPlacement && (
+        <Alert>
+          <AlertTitle>Personal → Call Placement — Transfer Slip</AlertTitle>
+          <AlertDescription>
+            Scenario: <strong>PERSONAL_TO_CALL_PLACEMENT</strong> — funds transferred to a Call Placement.
+            Available balance (snapshot): <strong>{formatCurrency(snapshot.available_amount)}</strong>.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField id="ts-amount" label="Transfer Amount (₦)" error={errs.amount?.message}>
+        <FormField
+          id="ts-amount"
+          label="Transfer Amount (₦)"
+          hint={
+            isSavingsToPersonal || isPersonalToCommercialPaper || isPersonalToCallPlacement
+              ? `Must not exceed available balance: ${formatCurrency(snapshot.available_amount)}`
+              : undefined
+          }
+          error={errs.amount?.message}
+        >
           <Input id="ts-amount" type="text" inputMode="decimal" placeholder="e.g. 5000000.00" disabled={disabled} {...register('amount' as never)} className="text-sm" />
         </FormField>
         <FormField id="ts-transfer-date" label="Transfer Date" error={errs.transferDate?.message}>

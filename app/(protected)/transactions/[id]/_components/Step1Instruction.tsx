@@ -85,6 +85,16 @@ export default function Step1Instruction({ transaction, customer, createdBy }: S
           value={createdBy?.full_name ?? transaction.created_by}
         />
         <Field label="Submitted At" value={formatDate(transaction.created_at)} />
+        {transaction.transaction_type === 'REVERSAL' && transaction.original_transaction_id && (
+          <Field
+            label="Original Transaction ID"
+            value={
+              <span className="font-mono text-xs text-muted-foreground">
+                {transaction.original_transaction_id}
+              </span>
+            }
+          />
+        )}
       </dl>
     </div>
   )

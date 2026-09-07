@@ -107,6 +107,189 @@ export async function createTransactionAction(
   }
 }
 
+// ─── createReversalAction ─────────────────────────────────────────────────────
+
+/**
+ * Creates a new REVERSAL transaction referencing an original completed transaction.
+ *
+ * Security: resolves caller role from DB — never trusts client-supplied role.
+ * Requirement 25.1: the original transaction is NOT deleted or overwritten.
+ * Requirement 25.2: reversal reason is required.
+ * Requirement 25.5: validates the original is eligible (not DRAFT, CANCELLED, or already reversed).
+ *
+ * Delegates to create_reversal RPC which atomically:
+ *   - Validates actor role (TREASURY_OFFICER)
+ *   - Validates the original transaction eligibility
+ *   - Checks no active reversal already exists (Req 25.5)
+ *   - Creates the REVERSAL transaction with INSTRUCTION_RECEIVED status
+ *   - Writes REVERSAL_CREATED audit events on both transactions (Req 25.4)
+ *
+ * Requirements: 25.1, 25.2, 25.3, 25.4, 25.5, 5.1, 5.3
+ */
+export async function createReversalAction(input: {
+  originalTransactionId: string
+  reversalReason: string
+}): Promise<ActionResult<{ transactionId: string; reference: string }>> {
+  // 1. Validate inputs
+  if (!input.originalTransactionId || typeof input.originalTransactionId !== 'string') {
+    return { success: false, error: 'Original transaction ID is required.' }
+  }
+  if (!input.reversalReason || input.reversalReason.trim() === '') {
+    return { success: false, error: 'Reversal reason is required.' }
+  }
+
+  // 2. Authenticate
+  const user = await getAuthenticatedUser()
+  if (!user) {
+    return { success: false, error: 'Not authenticated.' }
+  }
+
+  // 3. Resolve role from DB — never from request body (Req 5.1)
+  const role = await resolveUserRole(user.id)
+  if (!role) {
+    return { success: false, error: 'No role assigned to your account.' }
+  }
+
+  // 4. Enforce TREASURY_OFFICER permission
+  if (role !== 'TREASURY_OFFICER' && role !== 'ADMIN') {
+    return {
+      success: false,
+      error: 'Only a Treasury Officer can create reversal transactions.',
+    }
+  }
+
+  // 5. Call the create_reversal RPC
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('create_reversal', {
+    p_original_transaction_id: input.originalTransactionId,
+    p_reversal_reason: input.reversalReason.trim(),
+  })
+
+  if (error) {
+    // Surface user-friendly messages for known error cases
+    if (error.message?.includes('DUPLICATE')) {
+      return { success: false, error: 'A reversal already exists for this transaction.' }
+    }
+    if (error.message?.includes('INVALID_STATE')) {
+      return {
+        success: false,
+        error: 'This transaction is not eligible for reversal (DRAFT or CANCELLED).',
+      }
+    }
+    if (error.message?.includes('NOT_FOUND')) {
+      return { success: false, error: 'Original transaction not found.' }
+    }
+    return { success: false, error: error.message }
+  }
+
+  const result = data as {
+    reversal_transaction_id: string
+    reversal_reference: string
+    status: string
+  }
+
+  // 6. Revalidate caches
+  revalidatePath('/transactions')
+  revalidatePath(`/transactions/${input.originalTransactionId}`)
+
+  return {
+    success: true,
+    data: {
+      transactionId: result.reversal_transaction_id,
+      reference: result.reversal_reference,
+    },
+  }
+}
+
+// ─── searchTransactionsByReferenceAction ──────────────────────────────────────
+
+/**
+ * Searches transactions by reference prefix for the reversal creation form combobox.
+ * Returns a lightweight list of matching transactions suitable for display.
+ *
+ * Only returns transactions in states that are eligible for reversal
+ * (excludes DRAFT and CANCELLED per Req 25.5; also excludes transactions
+ * that already have an active reversal).
+ *
+ * Requirements: 25.5, 22.4
+ */
+export async function searchTransactionsByReferenceAction(
+  query: string,
+): Promise<
+  ActionResult<
+    Array<{
+      id: string
+      transaction_reference: string
+      transaction_type: string
+      status: string
+      requested_amount: string
+      customer_name: string | null
+    }>
+  >
+> {
+  if (!query || query.trim().length < 2) {
+    return { success: true, data: [] }
+  }
+
+  const user = await getAuthenticatedUser()
+  if (!user) {
+    return { success: false, error: 'Not authenticated.' }
+  }
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('treasury_transactions')
+    .select(
+      `id, transaction_reference, transaction_type, status, requested_amount,
+       customers ( name )`,
+    )
+    .ilike('transaction_reference', `${query.trim()}%`)
+    .not('status', 'in', '("DRAFT","CANCELLED")')
+    .order('created_at', { ascending: false })
+    .limit(20)
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  // Filter out transactions that already have an active (non-rejected/non-cancelled) reversal
+  const txIds = (data ?? []).map((t) => (t as Record<string, unknown>).id as string)
+
+  let alreadyReversedIds = new Set<string>()
+  if (txIds.length > 0) {
+    const { data: reversals } = await supabase
+      .from('treasury_transactions')
+      .select('original_transaction_id')
+      .eq('transaction_type', 'REVERSAL')
+      .not('status', 'in', '("REJECTED","CANCELLED")')
+      .in('original_transaction_id', txIds)
+
+    alreadyReversedIds = new Set(
+      (reversals ?? []).map(
+        (r) => (r as Record<string, unknown>).original_transaction_id as string,
+      ),
+    )
+  }
+
+  const results = (data ?? [])
+    .filter((t) => !alreadyReversedIds.has((t as Record<string, unknown>).id as string))
+    .map((t) => {
+      const row = t as Record<string, unknown>
+      const customer = row.customers as { name: string } | null
+      return {
+        id: row.id as string,
+        transaction_reference: row.transaction_reference as string,
+        transaction_type: row.transaction_type as string,
+        status: row.status as string,
+        requested_amount: row.requested_amount as string,
+        customer_name: customer?.name ?? null,
+      }
+    })
+
+  return { success: true, data: results }
+}
+
 // ─── getTransactionWorkspaceAction ───────────────────────────────────────────
 
 /**

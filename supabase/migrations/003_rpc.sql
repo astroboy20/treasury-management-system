@@ -611,6 +611,26 @@ BEGIN
       v_tx.transaction_type USING ERRCODE = '22000';
   END IF;
 
+  -- 4a. INTERNAL_TRANSFER — server-side balance check (Req 22.2)
+  --     Verify the savings account available_amount from the investment_verifications
+  --     snapshot is ≥ the requested_amount before permitting Transfer Slip preparation.
+  IF v_tx.transaction_type = 'INTERNAL_TRANSFER' THEN
+    DECLARE
+      v_available_amount NUMERIC;
+    BEGIN
+      SELECT iv.available_amount INTO v_available_amount
+      FROM investment_verifications iv
+      WHERE iv.transaction_id = p_transaction_id;
+
+      IF v_available_amount IS NOT NULL AND v_available_amount < v_tx.requested_amount THEN
+        RAISE EXCEPTION
+          'INSUFFICIENT_BALANCE: available balance (%) is less than requested transfer amount (%) — Req 22.2',
+          v_available_amount, v_tx.requested_amount
+          USING ERRCODE = '22003';
+      END IF;
+    END;
+  END IF;
+
   -- 5. Generate voucher number
   v_voucher_num := generate_voucher_number();
 
