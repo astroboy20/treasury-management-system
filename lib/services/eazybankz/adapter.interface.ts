@@ -4,28 +4,88 @@
  * Encapsulates all reads and writes to the Eazybankz banking mirror system.
  * Phase 6 replaces the mock implementation with a real HTTP client.
  *
- * Design: §Eazybankz Adapter
+ * Design: §Eazybankz Adapter Interface
+ * Requirements: 30.1, 30.3
  */
 
-export interface EazybankzInvestment {
-  externalReference: string
-  productType: string
-  principal: string
-  interestRate: string
-  accruedInterest: string
-  effectiveDate: string       // ISO date YYYY-MM-DD
-  maturityDate: string | null // null for open-ended products (e.g., CALL)
-  outstandingBalance: string
-  availableAmount: string
-  status: string
+// ─── Error class ─────────────────────────────────────────────────────────────
+
+/**
+ * Typed error thrown by any EazybankzAdapter implementation.
+ * Callers should catch this specifically to distinguish Eazybankz errors
+ * from other application errors.
+ */
+export class EazybankzError extends Error {
+  /** HTTP status code or internal error code from the mirror system. */
+  readonly code: string | number
+  /** The original cause, if any. */
+  readonly cause?: unknown
+
+  constructor(message: string, code: string | number = 'EAZYBANKZ_ERROR', cause?: unknown) {
+    super(message)
+    this.name = 'EazybankzError'
+    this.code = code
+    this.cause = cause
+  }
 }
 
-// ─── Input shape for booking a new rolled investment ─────────────────────────
+// ─── Data shapes ─────────────────────────────────────────────────────────────
 
-export interface CreateInvestmentInput {
+/**
+ * Investment record returned by the Eazybankz mirror.
+ * All monetary values are strings to preserve NUMERIC precision through
+ * the TypeScript layer (Req 30.3).
+ */
+export interface EazybankzInvestment {
+  /** Eazybankz-assigned external reference for this investment. */
+  id: string
+  /** The Greenline customer ID cross-referenced in the mirror. */
+  customerId: string
+  productType: 'FIXED_DEPOSIT' | 'CALL' | 'COMMERCIAL_PAPER' | 'CMS'
+  /** Principal amount as a NUMERIC-compatible string, e.g. "5000000.0000". */
+  principal: string
+  /** Annual interest rate as a decimal string, e.g. "0.125000" for 12.5%. */
+  interestRate: string
+  /** Accrued interest to date as a NUMERIC-compatible string. */
+  accruedInterest: string
+  /** ISO date YYYY-MM-DD — investment effective (start) date. */
+  effectiveDate: string
+  /** ISO date YYYY-MM-DD — maturity date; may be null for open-ended products. */
+  maturityDate: string
+  /** Outstanding balance as a NUMERIC-compatible string. */
+  outstandingBalance: string
+  /** Amount available for withdrawal as a NUMERIC-compatible string. */
+  availableAmount: string
+  status: 'ACTIVE' | 'TERMINATED' | 'ROLLED_OVER' | 'MATURED'
+  /** The same Eazybankz external reference, exposed as a named field for clarity. */
+  externalReference: string
+}
+
+/**
+ * Account balance record returned by the Eazybankz mirror.
+ * All monetary values are strings to preserve NUMERIC precision (Req 30.3).
+ */
+export interface EazybankzBalance {
+  /** The Eazybankz account identifier. */
+  accountId: string
+  /** Funds available for immediate use as a NUMERIC-compatible string. */
+  availableBalance: string
+  /** Total ledger balance (including cleared but unsettled funds) as a NUMERIC-compatible string. */
+  ledgerBalance: string
+  /** ISO 4217 currency code, e.g. "NGN". */
+  currency: string
+}
+
+/**
+ * Input shape for booking a new investment in the Eazybankz mirror.
+ * Called on Operations execution for ROLLOVER transactions (Req 17.7).
+ */
+export interface CreateInvestmentData {
   /** The Greenline customer ID (UUID) for cross-reference. */
   customerId: string
-  /** Amount being invested / rolled (NUMERIC-compatible string). */
+  /** Product type to create. */
+  productType: string
+  /** Amount being invested / rolled as a NUMERIC-compatible string. */
   principal: string
   /** Annual interest rate as a decimal string, e.g. "0.125000" for 12.5%. */
   interestRate: string
@@ -33,97 +93,118 @@ export interface CreateInvestmentInput {
   tenorDays: number
   /** ISO date YYYY-MM-DD — investment effective (start) date. */
   effectiveDate: string
-  /** ISO date YYYY-MM-DD — investment maturity date. */
-  maturityDate: string
-  /** Product type, e.g. "FIXED_DEPOSIT". */
-  productType: string
   /** The Greenline transaction ID that triggered the booking. */
   sourceTransactionId: string
 }
 
-export interface CreateInvestmentResult {
-  /** The external reference assigned by the mirror system. */
-  externalReference: string
-  /** Confirmation status from the mirror. */
-  status: string
+/**
+ * Input shape for posting a transaction entry in the Eazybankz mirror.
+ * Used for THIRD_PARTY_PAYMENT, INTERNAL_TRANSFER, and similar scenarios
+ * where an accounting entry must be created in the mirror.
+ */
+export interface CreateTransactionData {
+  /** The Greenline customer ID (UUID). */
+  customerId: string
+  /** Transaction type as recognised by the Eazybankz mirror. */
+  transactionType: string
+  /** Amount being transacted as a NUMERIC-compatible string. */
+  amount: string
+  /** ISO 4217 currency code, e.g. "NGN". */
+  currency: string
+  /** Beneficiary account number (for external transfers). */
+  beneficiaryAccountNumber?: string
+  /** Beneficiary bank name (for external transfers). */
+  beneficiaryBankName?: string
+  /** Narration / purpose of the transaction. */
+  narration: string
+  /** The Greenline transaction ID that triggered this posting. */
+  sourceTransactionId: string
 }
 
-// ─── Input shape for updating an existing investment ─────────────────────────
+// ─── Adapter interface ────────────────────────────────────────────────────────
 
-export interface UpdateInvestmentInput {
-  /** New status to set on the investment, e.g. 'TERMINATED', 'MATURED'. */
-  status?: 'ACTIVE' | 'TERMINATED' | 'ROLLED_OVER' | 'MATURED'
-  /** Updated outstanding balance after a payment (NUMERIC-compatible string). */
-  outstandingBalance?: string
-  /** Updated available amount after a payment (NUMERIC-compatible string). */
-  availableAmount?: string
-  /** Updated accrued interest after an interest payment (NUMERIC-compatible string). */
-  accruedInterest?: string
-  /** The Greenline transaction ID that triggered the update. */
-  sourceTransactionId?: string
-}
-
-export interface UpdateInvestmentResult {
-  /** The external reference of the updated investment. */
-  externalReference: string
-  /** The new status after the update. */
-  status: string
-}
-
-// ─── Input / result shapes for reversing a transaction ───────────────────────
-
-export interface ReverseTransactionResult {
-  /** The reversal ID assigned by the mirror system. */
-  reversalId: string
-  /** The external reference of the original transaction that was reversed. */
-  originalReference: string
-  /** Confirmation status from the mirror. */
-  status: string
-}
-
+/**
+ * Contract for all Eazybankz mirror interactions.
+ *
+ * Phase 1–5: satisfied by MockEazybankzAdapter (reads/writes local DB).
+ * Phase 6: satisfied by RealEazybankzAdapter (calls live Eazybankz HTTP API).
+ *
+ * Implementations MUST:
+ *   - Return all monetary values as strings.
+ *   - Throw EazybankzError on any system-level failure.
+ *   - Never be called directly from components or pages — only from
+ *     Server Actions or service layer functions.
+ */
 export interface EazybankzAdapter {
   /**
-   * Fetch current investment data for a given external reference.
-   * Returns null if the investment is not found in the mirror.
+   * Fetch current investment data by Eazybankz external reference.
+   * Returns the full investment record or throws EazybankzError if not found.
+   *
+   * Used in Step 4 (Investment Verification) to pre-fill reference values.
+   * Req 30.1
    */
-  getInvestment(externalReference: string): Promise<EazybankzInvestment | null>
+  getInvestment(investmentId: string): Promise<EazybankzInvestment>
+
+  /**
+   * Fetch current account balance for a given account ID.
+   * Returns the balance record or throws EazybankzError if not found.
+   *
+   * Used for SAVINGS_FUNDS_OUT, CALL_FUNDS_OUT, and CMS_FUNDS_OUT scenarios
+   * to display available balance at Step 4.
+   * Req 30.1
+   */
+  getBalance(accountId: string): Promise<EazybankzBalance>
+
+  /**
+   * Fetch the current accrued interest for an investment.
+   * Returns the accrued interest as a NUMERIC-compatible string.
+   *
+   * Used for ANNIVERSARY_PAYMENT and PRE_LIQUIDATION scenarios.
+   * Req 30.1
+   */
+  getAccruedInterest(investmentId: string): Promise<string>
 
   /**
    * Book a new investment in the Eazybankz mirror.
+   * Returns the created investment record including the assigned external reference.
+   *
    * Called on Operations execution for ROLLOVER transactions (Req 17.7).
-   * Phase 1–5: persists to the local `investments` table as a mock.
    * Phase 6: calls the live Eazybankz API.
    */
-  createInvestment(input: CreateInvestmentInput): Promise<CreateInvestmentResult>
+  createInvestment(data: CreateInvestmentData): Promise<EazybankzInvestment>
 
   /**
    * Update an existing investment record in the Eazybankz mirror.
+   * Returns the updated investment record.
+   *
    * Called on Operations execution for:
    *   - MATURITY_TERMINATION → status: 'TERMINATED' (Req 18.3)
    *   - PRE_LIQUIDATION (partial) → updated principal after rebooking (Req 19.5)
    *   - ANNIVERSARY_PAYMENT → updated accrued interest after payout (Req 20.4)
    *   - SAVINGS/CALL/CMS_FUNDS_OUT → updated balance after withdrawal (Req 24.3)
-   *
-   * Phase 1–5: updates the local `investments` table as a mock.
-   * Phase 6: calls the live Eazybankz API.
    */
   updateInvestment(
-    externalReference: string,
-    data: UpdateInvestmentInput,
-  ): Promise<UpdateInvestmentResult>
+    investmentId: string,
+    data: Partial<CreateInvestmentData>,
+  ): Promise<EazybankzInvestment>
+
+  /**
+   * Post a transaction entry in the Eazybankz mirror.
+   * Returns the Eazybankz-assigned transaction ID.
+   *
+   * Called for THIRD_PARTY_PAYMENT and INTERNAL_TRANSFER scenarios
+   * when an accounting entry must exist in the mirror.
+   * Req 30.3
+   */
+  createTransaction(data: CreateTransactionData): Promise<{ transactionId: string }>
 
   /**
    * Reverse the original Eazybankz posting for a REVERSAL transaction.
+   * Returns the mirror-assigned reversal ID.
+   *
    * Called on Operations execution for REVERSAL type (Req 25.3).
-   *
-   * @param originalExternalReference  The external_reference of the original posting to reverse.
-   * @param reason                     Non-empty reversal reason (Req 25.2).
-   *
-   * Phase 1–5: logs the reversal in-memory on the local investments table as a mock.
-   * Phase 6: calls the live Eazybankz API.
+   * @param transactionId  The Eazybankz transaction ID of the original posting.
+   * @param reason         Non-empty reversal reason (Req 25.2).
    */
-  reverseTransaction(
-    originalExternalReference: string,
-    reason: string,
-  ): Promise<ReverseTransactionResult>
+  reverseTransaction(transactionId: string, reason: string): Promise<{ reversalId: string }>
 }

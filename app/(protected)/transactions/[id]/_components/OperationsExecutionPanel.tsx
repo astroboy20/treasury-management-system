@@ -199,12 +199,13 @@ export default function OperationsExecutionPanel({
     setSubmitting(false)
 
     if (result.success) {
-      // Show a Sonner warning toast if the Eazybankz mirror sync failed after the execution
-      // was recorded successfully (Req 30.5 — best-effort in Phase 1–5).
+      // Show a Sonner error toast if the Eazybankz mirror sync failed after the execution
+      // was attempted. The execution_status is now FAILED and the transaction stays at
+      // OPERATIONS_COMPLETED — it will not advance to Treasury confirmation (Req 30.5).
       if (result.data?.adapterWarning) {
-        toast.warning('Execution recorded — Eazybankz sync issue', {
+        toast.error('Execution failed — Eazybankz sync error', {
           description: result.data.adapterWarning,
-          duration: 10000,
+          duration: 12000,
         })
       } else {
         toast.success('Transaction execution recorded successfully.')

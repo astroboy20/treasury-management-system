@@ -547,13 +547,13 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 6. Phase 6 — Eazybankz Mock Adapter
-  - [ ] 6.1 Create `lib/services/eazybankz/adapter.interface.ts`
+  - [x] 6.1 Create `lib/services/eazybankz/adapter.interface.ts`
     - Define all interfaces as specified in the design: `EazybankzInvestment`, `EazybankzBalance`, `CreateInvestmentData`, `CreateTransactionData`, and `EazybankzAdapter`.
     - All monetary values typed as `string` to preserve numeric precision through the TypeScript layer.
     - Export typed error class `EazybankzError`.
     - _Requirements: 30.1, 30.3_
 
-  - [ ] 6.2 Create `lib/services/eazybankz/mock.adapter.ts`
+  - [x] 6.2 Create `lib/services/eazybankz/mock.adapter.ts`
     - Implement `MockEazybankzAdapter implements EazybankzAdapter`.
     - Seed the in-memory store from the 18 customers A–R data in `supabase/seed.sql` (matching principal, accrued interest, rate, balance values).
     - `getInvestment(id)`: returns seeded investment data; throws `EazybankzError` for `id` prefixed with `'FAIL_'`.
@@ -566,20 +566,20 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - All methods are `async` to match the real adapter interface.
     - _Requirements: 30.2, 30.3_
 
-  - [ ] 6.3 Create `lib/services/eazybankz/index.ts`
+  - [x] 6.3 Create `lib/services/eazybankz/index.ts`
     - Export `eazybankzAdapter: EazybankzAdapter` resolved at module load time:
       - `EAZYBANKZ_MODE === 'real'` → `new RealEazybankzAdapter()` (placeholder stub)
       - default → `new MockEazybankzAdapter()`
     - Export all types from `adapter.interface.ts`.
     - _Requirements: 30.3, 30.4_
 
-  - [ ] 6.4 Wire Step 4 investment verification to Eazybankz adapter
+  - [x] 6.4 Wire Step 4 investment verification to Eazybankz adapter
     - In the `verifyInvestmentAction` (or the server component that pre-fetches data for Step 4), call `eazybankzAdapter.getInvestment(transaction.investment.external_reference)` server-side.
     - Pass the returned data as pre-fill values to the `InvestmentVerificationPanel`.
     - Never call the adapter from a browser component.
     - _Requirements: 10.1, 30.4_
 
-  - [ ] 6.5 Wire Operations execution to Eazybankz adapter calls (integration)
+  - [x] 6.5 Wire Operations execution to Eazybankz adapter calls (integration)
     - This is already introduced in task 4.5. In Phase 6, verify the mock adapter handles all scenario paths: ROLLOVER, MATURITY_TERMINATION, PRE_LIQUIDATION (partial), ANNIVERSARY_PAYMENT, INTERNAL_TRANSFER, INFLOW, REVERSAL, SAVINGS/CALL/CMS Funds-Out.
     - Add error path: when adapter throws `EazybankzError`, surface via Sonner toast and write `OPERATIONS_COMPLETED` with `execution_status: 'FAILED'`; do not transition to TREASURY_CONFIRMED.
     - _Requirements: 30.5_

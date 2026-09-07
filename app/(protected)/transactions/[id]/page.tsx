@@ -14,7 +14,7 @@ import Step5VoucherGeneration from './_components/Step5VoucherGeneration'
 import Step6ApprovalChain from './_components/Step6ApprovalChain'
 import OperationsExecutionPanel from './_components/OperationsExecutionPanel'
 import TreasuryCompletionPanel from './_components/TreasuryCompletionPanel'
-import { eazybankzAdapter } from '@/lib/services/eazybankz'
+import { eazybankzAdapter, EazybankzError } from '@/lib/services/eazybankz'
 import type { StepMeta } from '@/lib/services/workflow.service'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 
@@ -253,12 +253,24 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
   const userId = user?.id ?? null
 
 
-  // Fetch Eazybankz investment data server-side for Step 4 (Req 10.1)
+  // Fetch Eazybankz investment data server-side for Step 4 (Req 10.1, 30.4).
   // Uses the external_reference from the linked investment record, if present.
+  // Falls back to null on any EazybankzError so the page degrades gracefully
+  // (Step 4 will display a manual-entry warning instead of crashing).
   const externalRef = workspace.investment?.external_reference ?? null
-  const eazybankzData = externalRef
-    ? await eazybankzAdapter.getInvestment(externalRef)
-    : null
+  let eazybankzData: import('@/lib/services/eazybankz').EazybankzInvestment | null = null
+  if (externalRef) {
+    try {
+      eazybankzData = await eazybankzAdapter.getInvestment(externalRef)
+    } catch (err) {
+      if (!(err instanceof EazybankzError)) throw err
+      // EazybankzError (NOT_FOUND, SIMULATED_FAILURE, etc.) — degrade gracefully.
+      // Step 4 will show the manual-entry fallback notice to the Treasury Officer.
+      console.warn(
+        `[Step4] Eazybankz lookup failed for ref "${externalRef}": [${err.code}] ${err.message}`,
+      )
+    }
+  }
 
   // Build step metadata from current transaction status
   const steps = buildStepsMeta(

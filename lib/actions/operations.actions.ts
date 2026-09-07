@@ -389,15 +389,40 @@ export async function executeTransactionAction(
             break
         }
       } catch (adapterError) {
-        // The DB execution succeeded — the Eazybankz mirror sync is best-effort in Phase 1–5.
-        // Write an audit event so operators can identify and replay the failed sync (Req 30.5).
+        // The DB RPC succeeded but the Eazybankz mirror sync failed (Req 30.5).
+        // Per the spec: record execution_status as 'FAILED' on the operations_executions row,
+        // write an EAZYBANKZ_SYNC_FAILED audit event, and do NOT allow transition to
+        // TREASURY_CONFIRMED — the transaction stays at OPERATIONS_COMPLETED.
         const errorMessage =
           adapterError instanceof Error ? adapterError.message : String(adapterError)
+        const isEazybankzError =
+          adapterError != null &&
+          typeof adapterError === 'object' &&
+          'name' in adapterError &&
+          (adapterError as { name: unknown }).name === 'EazybankzError'
 
         console.error('[executeTransactionAction] Eazybankz adapter call failed:', errorMessage)
 
-        // Write EAZYBANKZ_SYNC_FAILED audit event so the failure is visible in the audit
-        // timeline and operators can action it (Req 30.5).
+        // 1. Update the operations_executions row to execution_status = 'FAILED' so the
+        //    RPC-written row reflects the true outcome (Req 30.5).
+        //    The RPC may have recorded 'SUCCESS' — we correct it here.
+        try {
+          await supabase
+            .from('operations_executions')
+            .update({
+              execution_status: 'FAILED',
+              execution_notes: `Eazybankz sync failed: ${errorMessage}`,
+            })
+            .eq('transaction_id', transactionId)
+        } catch (updateErr) {
+          console.error(
+            '[executeTransactionAction] Failed to update operations_executions to FAILED:',
+            updateErr instanceof Error ? updateErr.message : updateErr,
+          )
+        }
+
+        // 2. Write EAZYBANKZ_SYNC_FAILED audit event so the failure is visible in the
+        //    audit timeline and operators can initiate reconciliation (Req 30.5).
         try {
           await supabase.from('audit_events').insert({
             transaction_id: transactionId,
@@ -407,8 +432,12 @@ export async function executeTransactionAction(
             to_status: 'OPERATIONS_COMPLETED',
             metadata: {
               error: errorMessage,
+              error_code: isEazybankzError
+                ? (adapterError as { code?: string | number }).code
+                : undefined,
               transaction_type: txData.transaction_type,
-              note: 'Eazybankz mirror sync failed post-execution. Manual reconciliation required.',
+              execution_status: 'FAILED',
+              note: 'Eazybankz mirror sync failed post-execution. Manual reconciliation required. Transaction stays at OPERATIONS_COMPLETED.',
             },
           })
         } catch (auditWriteError) {
@@ -419,11 +448,13 @@ export async function executeTransactionAction(
           )
         }
 
-        // Surface the failure back to the caller as a warning so the UI can show a
-        // Sonner toast explaining the partial success (execution recorded, mirror sync failed).
+        // 3. Surface the failure back to the caller so the UI can show a Sonner toast
+        //    explaining the outcome: execution recorded as FAILED, mirror sync failed,
+        //    and the transaction remains at OPERATIONS_COMPLETED (Req 30.5).
         adapterWarning =
-          `Execution recorded, but the Eazybankz mirror sync failed: ${errorMessage}. ` +
-          `An audit event has been logged for reconciliation.`
+          `Eazybankz sync failed: ${errorMessage}. ` +
+          `Execution has been recorded as FAILED. The transaction remains at OPERATIONS_COMPLETED ` +
+          `and will not advance to Treasury confirmation until the sync issue is resolved.`
       }
     }
   }
