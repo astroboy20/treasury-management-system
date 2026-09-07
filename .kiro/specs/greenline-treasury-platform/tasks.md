@@ -517,31 +517,31 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Paginated table: ID, timestamp, event type badge, actor name, transaction reference, from status, to status.
     - _Requirements: 28.1, 28.2, 28.3, 29.1_
 
-  - [ ] 5.2 Create `/audit/[transactionId]` — full transaction audit page
+  - [x] 5.2 Create `/audit/[transactionId]` — full transaction audit page
     - Create `app/(protected)/audit/[transactionId]/page.tsx`.
     - Load all `audit_events` for the transaction in chronological ASC order.
     - Display the full `<AuditTimeline />` component.
     - Show transaction header summary (reference, customer, type, final status).
     - _Requirements: 28.3, 28.4_
 
-  - [ ] 5.3 Add server-side transaction search to `/transactions`
+  - [x] 5.3 Add server-side transaction search to `/transactions`
     - Extend `listTransactions()` in `transaction.service.ts` to accept and apply all filter params: `type`, `status`, `from`, `to`, `customer` (ILIKE prefix match), `reference` (ILIKE prefix), `page`, `pageSize`.
     - Server-side query via Supabase with `.ilike()` for text fields, `.gte()`/`.lte()` for dates, `.eq()` for enums.
     - Return `{ data: Transaction[], count: number }` for pagination rendering.
     - _Requirements: 29.1, 29.2, 29.3, 29.4_
 
-  - [ ] 5.4 Wire `/vouchers` page to real vouchers data
+  - [x] 5.4 Wire `/vouchers` page to real vouchers data
     - Rewrite `app/(protected)/vouchers/page.tsx` as a server component.
     - Query `vouchers JOIN treasury_transactions JOIN customers` with filters: voucher type, status, date range.
     - Each row links to the transaction workspace.
     - _Requirements: 6.6_
 
-  - [ ] 5.5 SLA breach detection in dashboard exceptions count
+  - [x] 5.5 SLA breach detection in dashboard exceptions count
     - Update the exceptions count query in the dashboard to include transactions where `sla_due_at < NOW()` and `status NOT IN ('COMPLETED', 'REJECTED', 'CANCELLED')`.
     - Update `<SlaIndicator />` to derive state from server-computed remaining time: green `> 2h`, amber `≤ 2h`, red `overdue`.
     - _Requirements: 37.1, 37.2, 37.3, 37.4_
 
-  - [ ] 5.6 Checkpoint — Phase 5 verification
+  - [x] 5.6 Checkpoint — Phase 5 verification
     - Verify audit page shows all event types for a completed transaction.
     - Verify search and filter return accurate paginated results.
     - Ensure all tests pass, ask the user if questions arise.

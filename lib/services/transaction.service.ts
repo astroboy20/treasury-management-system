@@ -2,6 +2,33 @@ import { createClient } from '@/lib/supabase/server'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * Unified filter + pagination params for `listTransactions()`.
+ * All fields are optional — omitted fields are not applied to the query.
+ */
+export interface ListTransactionsFilters {
+  /** Filter by transaction_type (exact match, eq). */
+  type?: string
+  /** Filter by status (exact match, eq). */
+  status?: string
+  /** Filter by created_at >= from (ISO date string, e.g. '2024-01-01'). */
+  from?: string
+  /** Filter by created_at <= to end-of-day (ISO date string, e.g. '2024-12-31'). */
+  to?: string
+  /** Filter by customer name prefix (ILIKE 'value%' on customers.name). */
+  customer?: string
+  /** Filter by transaction_reference prefix (ILIKE 'value%'). */
+  reference?: string
+  /** 1-based page number. Defaults to 1. */
+  page?: number
+  /** Number of rows per page. Defaults to 25. */
+  pageSize?: number
+}
+
+/**
+ * @deprecated Use `ListTransactionsFilters` instead.
+ * Kept for backward compatibility with existing call sites.
+ */
 export interface TransactionFilters {
   type?: string
   status?: string
@@ -11,6 +38,9 @@ export interface TransactionFilters {
   reference?: string
 }
 
+/**
+ * @deprecated Use `ListTransactionsFilters` instead.
+ */
 export interface PaginationParams {
   page?: number
   pageSize?: 10 | 25 | 50
@@ -225,16 +255,46 @@ export async function getTransaction(id: string): Promise<TransactionListItem | 
 /**
  * Lists transactions with server-side filtering and pagination.
  * All filters are applied via Supabase query — no client-side filtering.
+ *
+ * Accepts a unified `ListTransactionsFilters` object that combines both
+ * filter criteria and pagination params. Also accepts the legacy two-argument
+ * form (TransactionFilters, PaginationParams) for backward compatibility.
+ *
+ * Requirements: 29.1, 29.2, 29.3, 29.4
  */
 export async function listTransactions(
-  filters: TransactionFilters = {},
+  filtersOrUnified: ListTransactionsFilters | TransactionFilters = {},
   pagination: PaginationParams = {},
 ): Promise<ListTransactionsResult> {
   const supabase = await createClient()
-  const { page = 1, pageSize = 25 } = pagination
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
 
+  // Support unified interface: if pagination fields are on the first arg, use them.
+  const unified = filtersOrUnified as ListTransactionsFilters
+  const page     = unified.page     ?? pagination.page     ?? 1
+  const pageSize = unified.pageSize ?? pagination.pageSize ?? 25
+
+  const rangeFrom = (page - 1) * pageSize
+  const rangeTo   = rangeFrom + pageSize - 1
+
+  // ── Step 1: resolve customer_ids for customer name prefix filter ──────────
+  // Supabase PostgREST does not support filtering on a joined table column
+  // directly in a count+range query. We pre-resolve matching customer IDs with
+  // a separate lightweight query, then use `.in('customer_id', ids)`.
+  let customerIdFilter: string[] | null = null
+  if (unified.customer) {
+    const { data: matchingCustomers } = await supabase
+      .from('customers')
+      .select('id')
+      .ilike('name', `${unified.customer}%`)
+
+    // If no customers match the prefix, short-circuit — nothing can match.
+    if (!matchingCustomers || matchingCustomers.length === 0) {
+      return { data: [], count: 0 }
+    }
+    customerIdFilter = matchingCustomers.map((c: { id: string }) => c.id)
+  }
+
+  // ── Step 2: build the main query ──────────────────────────────────────────
   let query = supabase
     .from('treasury_transactions')
     .select(
@@ -261,26 +321,31 @@ export async function listTransactions(
       { count: 'exact' },
     )
     .order('created_at', { ascending: false })
-    .range(from, to)
+    .range(rangeFrom, rangeTo)
 
-  // Apply filters
-  if (filters.type) {
-    query = query.eq('transaction_type', filters.type)
+  // Req 29.2 — filter by transaction type (exact enum match)
+  if (unified.type) {
+    query = query.eq('transaction_type', unified.type)
   }
-  if (filters.status) {
-    query = query.eq('status', filters.status)
+  // Req 29.2 — filter by status (exact enum match)
+  if (unified.status) {
+    query = query.eq('status', unified.status)
   }
-  if (filters.from) {
-    query = query.gte('created_at', filters.from)
+  // Req 29.3 — filter by date range on created_at
+  if (unified.from) {
+    query = query.gte('created_at', unified.from)
   }
-  if (filters.to) {
-    // Add 1 day to include end date fully
-    const toDate = new Date(filters.to)
-    toDate.setDate(toDate.getDate() + 1)
-    query = query.lt('created_at', toDate.toISOString())
+  if (unified.to) {
+    // Include the full end day: append T23:59:59 to the date string.
+    query = query.lte('created_at', `${unified.to}T23:59:59`)
   }
-  if (filters.reference) {
-    query = query.ilike('transaction_reference', `${filters.reference}%`)
+  // Req 29.4 — free-text prefix search on transaction_reference
+  if (unified.reference) {
+    query = query.ilike('transaction_reference', `${unified.reference}%`)
+  }
+  // Req 29.4 — free-text prefix search on customer name (via pre-resolved IDs)
+  if (customerIdFilter) {
+    query = query.in('customer_id', customerIdFilter)
   }
 
   const { data, error, count } = await query

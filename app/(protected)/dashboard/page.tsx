@@ -43,8 +43,14 @@ const IN_PROGRESS_STATUSES = [
   'MD_APPROVED',
 ] as const
 
-/** Statuses that count as exceptions. */
+/** Statuses that count as terminal exceptions (bad outcome). */
 const EXCEPTION_STATUSES = ['REJECTED', 'RETURNED', 'FAILED', 'CANCELLED'] as const
+
+/**
+ * Statuses that are terminal / closed — SLA tracking stops once a transaction
+ * reaches one of these states (Req 37.2, 37.4).
+ */
+const TERMINAL_STATUSES = ['COMPLETED', 'REJECTED', 'CANCELLED'] as const
 
 /** Maps each role to the transaction statuses they are responsible for. */
 const ROLE_ACTION_STATUSES: Record<string, string[]> = {
@@ -139,18 +145,20 @@ async function fetchDashboardData(
       .eq('status', 'COMPLETED')
       .gte('completed_at', weekStart.toISOString()),
 
-    // 4. Exceptions count
+    // 4. Exception-status count (REJECTED, RETURNED, FAILED, CANCELLED)
     supabase
       .from('treasury_transactions')
       .select('*', { count: 'exact', head: true })
       .in('status', EXCEPTION_STATUSES),
 
-    // 5. SLA breach count within exceptions
+    // 5. SLA breach count — active (non-terminal) transactions past their SLA deadline.
+    //    Per Req 37.2: sla_due_at < NOW() AND status NOT IN (COMPLETED, REJECTED, CANCELLED).
     supabase
       .from('treasury_transactions')
       .select('*', { count: 'exact', head: true })
-      .in('status', EXCEPTION_STATUSES)
-      .lt('sla_due_at', new Date().toISOString()),
+      .not('sla_due_at', 'is', null)
+      .lt('sla_due_at', new Date().toISOString())
+      .not('status', 'in', `(${TERMINAL_STATUSES.join(',')})`),
 
     // 6. Most recent 10 transactions with customer name
     supabase
@@ -185,7 +193,9 @@ async function fetchDashboardData(
     inProgress: inProgressResult.count ?? 0,
     completedThisWeekCount,
     completedThisWeekAmount,
-    exceptions: exceptionsResult.count ?? 0,
+    // Exceptions = bad-status rows + active transactions that have breached their SLA.
+    // Req 37.2: any non-terminal transaction past sla_due_at counts as an exception.
+    exceptions: (exceptionsResult.count ?? 0) + (slaBreachResult.count ?? 0),
     slaBreachCount: slaBreachResult.count ?? 0,
   }
 

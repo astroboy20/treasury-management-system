@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowUpRight, Plus, SlidersHorizontal } from 'lucide-react'
 import { getAuthenticatedUser, resolveUserRole } from '@/lib/services/auth.service'
-import { listTransactions, type TransactionListItem } from '@/lib/services/transaction.service'
+import { listTransactions, type TransactionListItem, type ListTransactionsFilters } from '@/lib/services/transaction.service'
 import { STATUS_TO_OWNER } from '@/lib/permissions/permissions'
 import TransactionFiltersBar from './_components/TransactionFiltersBar'
 import PaginationBar from './_components/PaginationBar'
@@ -174,14 +174,16 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
     ? (rawPageSize as 10 | 25 | 50)
     : 25
 
-  // Build filter object from URL params
-  const filters = {
+  // Build filter object from URL params (unified: includes page + pageSize)
+  const filters: ListTransactionsFilters = {
     type:      params.type      || undefined,
     status:    params.status    || undefined,
     from:      params.from      || undefined,
     to:        params.to        || undefined,
     customer:  params.customer  || undefined,
     reference: params.reference || undefined,
+    page,
+    pageSize,
   }
 
   // Fetch paginated, filtered results server-side
@@ -189,7 +191,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   let totalCount = 0
 
   try {
-    const result = await listTransactions(filters, { page, pageSize })
+    const result = await listTransactions(filters)
     transactions = result.data
     totalCount   = result.count
   } catch {
