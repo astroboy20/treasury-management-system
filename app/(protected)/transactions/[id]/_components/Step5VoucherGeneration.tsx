@@ -107,6 +107,13 @@ const REQUIRES_PAYMENT_INSTRUCTION = new Set([
   'ROLLOVER',          // for PRINCIPAL_ONLY / PARTIAL_PRINCIPAL / INTEREST_ONLY sub-types
 ])
 
+// Transaction types that use the Savings/Call/CMS Funds-Out layout (Req 38)
+const SAVINGS_FUNDS_OUT_TYPES = new Set([
+  'SAVINGS_FUNDS_OUT',
+  'CALL_FUNDS_OUT',
+  'CMS_FUNDS_OUT',
+])
+
 // ─── Animation style ──────────────────────────────────────────────────────────
 
 const PANEL_ANIMATION_STYLE = `
@@ -252,6 +259,25 @@ function CalculationPreview({
         <Field label="Accrued Interest" value={formatCurrency(snapshot.accrued_interest)} />
         <Field label="Interest Rate" value={formatRate(snapshot.interest_rate)} />
         <Field label="Available Amount" value={formatCurrency(snapshot.available_amount)} />
+        {/* Savings/Call/CMS Funds-Out: available_balance is the primary field (Req 38.1, 38.2) */}
+        {(transactionType === 'SAVINGS_FUNDS_OUT' || transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT') && (
+          <>
+            <div className="sm:col-span-2">
+              <Separator className="my-1" />
+              <p className="text-xs font-medium text-blue-700 mt-2">
+                {transactionType === 'CALL_FUNDS_OUT' ? 'Call' : transactionType === 'CMS_FUNDS_OUT' ? 'CMS' : 'Savings'} Funds-Out — Available Balance
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <p className="text-xs text-blue-600/80">
+                Rule: FUNDS_OUT_AVAILABLE_BALANCE — available_balance is sourced from the
+                investment verification snapshot. No interest calculation formula is applied (Req 38.4).
+                The server records the payment and updates the account balance via the Eazybankz adapter
+                on Operations execution (Req 24.3).
+              </p>
+            </div>
+          </>
+        )}
         {(transactionType === 'PRE_LIQUIDATION') && (
           <>
             <div className="sm:col-span-2">
@@ -602,7 +628,7 @@ function FundsInVoucherContent({ voucher }: { voucher: NonNullable<TransactionWo
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
       <Field label="Amount" value={formatCurrency(voucher.net_amount)} />
-      <Field label="Interest Rate" value={inputs?.interest_rate ? formatRate(inputs.interest_rate) : '—'} />
+      <Field label="Interest Rate" value={(inputs?.rate ?? inputs?.interest_rate) ? formatRate((inputs?.rate ?? inputs?.interest_rate)!) : '—'} />
       <Field label="Tenor (days)" value={inputs?.tenor ?? '—'} />
       <Field label="Effective Date" value={inputs?.effective_date ?? '—'} />
       <Field label="Maturity Date" value={inputs?.maturity_date ?? '—'} />
@@ -839,6 +865,105 @@ interface VariantFormProps {
   transactionType?: string
   /** Whether this THIRD_PARTY_PAYMENT is an internal transfer (Req 21.1, 21.3) */
   isInternalPayment?: boolean
+}
+
+// ─── Savings/Call/CMS Funds-Out form (Req 38) ────────────────────────────────
+
+/**
+ * Simplified Funds-Out form for SAVINGS_FUNDS_OUT, CALL_FUNDS_OUT, CMS_FUNDS_OUT.
+ *
+ * Per Req 38.2: Available Balance is the primary field. The standard
+ * principal/interest/WHT/charge fields are NOT shown. Interest is sourced
+ * from Eazybankz and not internally calculated (Req 38.4).
+ *
+ * The `availableBalance` and `netAmount` fields are pre-filled from the
+ * investment verification snapshot. The Treasury Officer confirms them and
+ * adds a transfer date and optional remarks.
+ *
+ * If an external payment is required (Req 38.3, 36.1), the Payment Instruction
+ * sub-form is rendered by the parent via `REQUIRES_PAYMENT_INSTRUCTION`.
+ *
+ * Requirements: 38.1, 38.2, 38.3, 38.4, 24.1, 24.2, 36.1
+ */
+function SavingsFundsOutForm({ disabled, register, errors, snapshot, transactionType }: VariantFormProps) {
+  const errs = errors as Record<string, { message?: string } | undefined>
+  const txTypeLabel =
+    transactionType === 'CALL_FUNDS_OUT'
+      ? 'Call'
+      : transactionType === 'CMS_FUNDS_OUT'
+        ? 'CMS'
+        : 'Savings'
+
+  return (
+    <div className="space-y-4">
+      {/* Contextual notice: available_balance is primary (Req 38.2) */}
+      <Alert>
+        <AlertTitle>{txTypeLabel} Funds-Out — Available Balance</AlertTitle>
+        <AlertDescription className="space-y-1">
+          <span className="block">
+            The <strong>Available Balance</strong> shown below is sourced directly from the
+            investment verification snapshot (Step 4). No interest calculation is applied (Req 38.4).
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            Confirm the available balance and enter the transfer date before preparing the voucher.
+            If this is an external payment, complete the Payment Instruction block below.
+          </span>
+        </AlertDescription>
+      </Alert>
+
+      {/* Hidden fields so the FUNDS_OUT Zod schema passes validation for unused numeric fields */}
+      <input type="hidden" {...(register('principal' as never))} value="0" />
+      <input type="hidden" {...(register('interest' as never))} value="0" />
+      <input type="hidden" {...(register('wht' as never))} value="0" />
+      <input type="hidden" {...(register('charge' as never))} value="0" />
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {/* Available Balance — primary display (Req 38.1, 38.2) */}
+        <FormField
+          id="sfo-available-balance"
+          label="Available Balance (₦)"
+          hint={`Snapshot: ${formatCurrency(snapshot.available_amount)}`}
+          error={errs.availableBalance?.message}
+        >
+          <Input
+            id="sfo-available-balance"
+            type="text"
+            inputMode="decimal"
+            defaultValue={snapshot.available_amount}
+            disabled={disabled}
+            {...register('availableBalance' as never)}
+            className="text-sm"
+          />
+        </FormField>
+
+        {/* Net Amount — matches available balance for this voucher type */}
+        <FormField
+          id="sfo-net-amount"
+          label="Net Amount (₦)"
+          hint="Equals the available balance (no deductions for this type)"
+          error={errs.netAmount?.message}
+        >
+          <Input
+            id="sfo-net-amount"
+            type="text"
+            inputMode="decimal"
+            defaultValue={snapshot.available_amount}
+            disabled={disabled}
+            {...register('netAmount' as never)}
+            className="text-sm"
+          />
+        </FormField>
+
+        <FormField id="sfo-transfer-date" label="Transfer Date" error={errs.transferDate?.message}>
+          <Input id="sfo-transfer-date" type="date" disabled={disabled} {...register('transferDate' as never)} className="text-sm" />
+        </FormField>
+      </div>
+
+      <FormField id="sfo-remarks" label="Remarks" required={false} error={errs.remarks?.message}>
+        <Textarea id="sfo-remarks" rows={2} maxLength={1000} placeholder="Optional remarks…" disabled={disabled} {...register('remarks' as never)} className="resize-none text-sm" />
+      </FormField>
+    </div>
+  )
 }
 
 function FundsInForm({ disabled, register, errors }: VariantFormProps) {
@@ -1313,6 +1438,8 @@ function buildDefaults(
     // For PRE_LIQUIDATION, pre-fill the 20% charge and net amount from the snapshot (Req 19.3, 19.4)
     const isPreLiquidation = transactionType === 'PRE_LIQUIDATION'
     const isThirdParty = transactionType === 'THIRD_PARTY_PAYMENT'
+    // For SAVINGS/CALL/CMS Funds-Out: available_balance is the primary field (Req 38.1, 38.2)
+    const isSavingsFundsOut = SAVINGS_FUNDS_OUT_TYPES.has(transactionType ?? '')
     const accruedInterest = parseFloat(snapshot?.accrued_interest ?? '0')
     const preLiqCharge = isPreLiquidation && isFinite(accruedInterest)
       ? (Math.round(accruedInterest * 0.20 * 1e4) / 1e4).toString()
@@ -1325,6 +1452,21 @@ function buildDefaults(
     const preLiqNetAmount = isPreLiquidation && isFinite(principal) && preLiqNetInterest
       ? (Math.round((principal + parseFloat(preLiqNetInterest)) * 1e4) / 1e4).toString()
       : ''
+
+    // Savings/Call/CMS Funds-Out: pre-fill availableBalance from snapshot (Req 38.1)
+    if (isSavingsFundsOut) {
+      return {
+        voucherType: 'FUNDS_OUT',
+        principal: '0',
+        interest: '0',
+        wht: '0',
+        charge: '0',
+        availableBalance: snapshot?.available_amount ?? '',
+        netAmount: snapshot?.available_amount ?? '',
+        transferDate: todayStr,
+        remarks: '',
+      } satisfies Partial<FundsOutVoucherInput>
+    }
 
     return {
       voucherType: 'FUNDS_OUT',
@@ -1540,7 +1682,7 @@ export default function Step5VoucherGeneration({
       </div>
 
       {/* No investment snapshot warning */}
-      {!investmentVerification && (
+      {!investmentVerification && transactionType !== 'INFLOW' && (
         <Alert>
           <AlertTitle>Investment snapshot not yet verified</AlertTitle>
           <AlertDescription>
@@ -1550,8 +1692,20 @@ export default function Step5VoucherGeneration({
         </Alert>
       )}
 
-      {/* Calculation preview */}
-      {investmentVerification && (
+      {/* INFLOW: Step 4 is skipped by design — show informational notice instead of CalculationPreview */}
+      {transactionType === 'INFLOW' && (
+        <Alert>
+          <AlertTitle>New Investment — Inflow</AlertTitle>
+          <AlertDescription>
+            INFLOW transactions create a brand-new investment. There is no existing investment
+            to verify in Step 4 (Req 23.1). Enter the investment details below to generate the
+            Funds-In voucher.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Calculation preview — not shown for INFLOW (no investment snapshot) */}
+      {investmentVerification && transactionType !== 'INFLOW' && (
         <CalculationPreview
           snapshot={investmentVerification}
           transactionType={transactionType}
@@ -1572,7 +1726,8 @@ export default function Step5VoucherGeneration({
       <form onSubmit={handleSubmit(onSubmit as Parameters<typeof handleSubmit>[0])} className="space-y-5" noValidate>
         {/* Variant-specific form fields */}
         {resolvedVoucherType === 'FUNDS_IN' && <FundsInForm {...formProps} />}
-        {resolvedVoucherType === 'FUNDS_OUT' && <FundsOutForm {...formProps} />}
+        {resolvedVoucherType === 'FUNDS_OUT' && SAVINGS_FUNDS_OUT_TYPES.has(transactionType) && <SavingsFundsOutForm {...formProps} />}
+        {resolvedVoucherType === 'FUNDS_OUT' && !SAVINGS_FUNDS_OUT_TYPES.has(transactionType) && <FundsOutForm {...formProps} />}
         {resolvedVoucherType === 'ROLLOVER_SLIP' && <RolloverSlipForm {...formProps} />}
         {resolvedVoucherType === 'TRANSFER_SLIP' && <TransferSlipForm {...formProps} />}
 

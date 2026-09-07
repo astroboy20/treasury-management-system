@@ -12,6 +12,7 @@ import Step3CustomerConfirmation, { BENEFICIARY_REQUIRED_TYPES } from './_compon
 import Step4InvestmentVerification from './_components/Step4InvestmentVerification'
 import Step5VoucherGeneration from './_components/Step5VoucherGeneration'
 import Step6ApprovalChain from './_components/Step6ApprovalChain'
+import OperationsExecutionPanel from './_components/OperationsExecutionPanel'
 import { eazybankzAdapter } from '@/lib/services/eazybankz'
 import type { StepMeta } from '@/lib/services/workflow.service'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
@@ -293,6 +294,51 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
               />
             </StepSection>
           ))}
+
+          {/* Operations execution panel — visible once MD has approved (Req 14.3, 14.6) */}
+          {(workspace.transaction.status === 'MD_APPROVED' ||
+            workspace.transaction.status === 'OPERATIONS_PROCESSING' ||
+            workspace.transaction.status === 'OPERATIONS_COMPLETED' ||
+            workspace.transaction.status === 'TREASURY_CONFIRMED' ||
+            workspace.transaction.status === 'COMPLETED' ||
+            workspace.operationsExecution !== null) && (
+            <section
+              aria-label="Operations execution"
+              className="rounded-xl border border-border bg-background"
+            >
+              {/* Section header */}
+              <div className="flex items-center gap-3 border-b border-border px-5 py-4 sm:px-6">
+                <span
+                  className={[
+                    'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                    workspace.operationsExecution
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-primary text-primary-foreground',
+                  ].join(' ')}
+                  aria-hidden
+                >
+                  {workspace.operationsExecution ? '✓' : '7'}
+                </span>
+                <span className="flex-1 text-sm font-medium">Operations Execution</span>
+                {workspace.operationsExecution ? (
+                  <span className="text-xs text-muted-foreground">Completed</span>
+                ) : (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                    In progress
+                  </span>
+                )}
+              </div>
+              {/* Panel content */}
+              <div className="px-5 py-4 sm:px-6">
+                <OperationsExecutionPanel
+                  transactionId={workspace.transaction.id}
+                  transactionStatus={workspace.transaction.status}
+                  operationsExecution={workspace.operationsExecution}
+                  canAct={userRole === 'OPERATIONS' || userRole === 'ADMIN'}
+                />
+              </div>
+            </section>
+          )}
         </main>
 
         {/* Sidebar column */}

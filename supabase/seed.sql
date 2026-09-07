@@ -595,6 +595,35 @@ VALUES
     '2026-01-01', NULL,
     4500000.0000, 4500000.0000,
     'ACTIVE'
+  ),
+
+  -- ── Customer R: Call Funds-Out ───────────────────────────────────────────
+  -- Call account — balance ₦3,200,000 (sourced from Eazybankz — Req 24.1, 24.2, 38.1)
+  -- No principal/interest split; available_balance is the primary field (Req 38.2)
+  (
+    'bb000012-0002-0000-0000-000000000120',
+    'aaaaaaaa-0012-0000-0000-000000000012',
+    'ac000012-0002-0000-0000-000000000120',
+    'EZBK-R-CL-001',
+    'CALL',
+    0.0000, 0.000000, 0.0000,
+    '2026-01-01', NULL,
+    3200000.0000, 3200000.0000,
+    'ACTIVE'
+  ),
+
+  -- ── Customer R: CMS Funds-Out ────────────────────────────────────────────
+  -- CMS account — balance ₦1,800,000 (sourced from Eazybankz — Req 24.1, 24.2, 38.1)
+  (
+    'bb000012-0003-0000-0000-000000000120',
+    'aaaaaaaa-0012-0000-0000-000000000012',
+    'ac000012-0003-0000-0000-000000000120',
+    'EZBK-R-CM-001',
+    'CMS',
+    0.0000, 0.000000, 0.0000,
+    '2026-01-01', NULL,
+    1800000.0000, 1800000.0000,
+    'ACTIVE'
   )
 
 ON CONFLICT (id) DO NOTHING;

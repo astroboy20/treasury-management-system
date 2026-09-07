@@ -331,6 +331,55 @@ export async function executeTransactionAction(
             break
           }
 
+          // ── SAVINGS_FUNDS_OUT / CALL_FUNDS_OUT / CMS_FUNDS_OUT:
+          //    update balance after withdrawal (Req 24.3, 38.1) ─────────────
+          //    All three types share the same execution logic: record the payment
+          //    and update the account balance in the Eazybankz mirror.
+          //    available_balance is sourced from the investment_verifications snapshot
+          //    (not recalculated — Req 38.4).  The new balance = snapshot_balance minus
+          //    the withdrawal amount (requested_amount on the transaction).
+          case 'SAVINGS_FUNDS_OUT':
+          case 'CALL_FUNDS_OUT':
+          case 'CMS_FUNDS_OUT': {
+            if (txData.investment_id) {
+              const { data: investment } = await supabase
+                .from('investments')
+                .select('external_reference, available_amount')
+                .eq('id', txData.investment_id)
+                .maybeSingle()
+
+              if (investment?.external_reference) {
+                // Load the investment_verifications snapshot to get confirmed available_balance
+                const { data: invVerification } = await supabase
+                  .from('investment_verifications')
+                  .select('available_amount')
+                  .eq('transaction_id', transactionId)
+                  .maybeSingle()
+
+                // Load the transaction's requested_amount (the withdrawal amount)
+                const { data: txForAmount } = await supabase
+                  .from('treasury_transactions')
+                  .select('requested_amount')
+                  .eq('id', transactionId)
+                  .single()
+
+                const snapshotBalance = invVerification?.available_amount
+                  ? Number(invVerification.available_amount)
+                  : Number(investment.available_amount ?? 0)
+                const withdrawalAmount = Number(txForAmount?.requested_amount ?? 0)
+                const newBalance = Math.max(0, snapshotBalance - withdrawalAmount)
+
+                // Update the investment record with the new balance after the withdrawal (Req 24.3)
+                await eazybankzAdapter.updateInvestment(investment.external_reference, {
+                  availableAmount: String(newBalance.toFixed(4)),
+                  outstandingBalance: String(newBalance.toFixed(4)),
+                  sourceTransactionId: transactionId,
+                })
+              }
+            }
+            break
+          }
+
           default:
             // Other transaction types are handled in later phases (4.5).
             break
@@ -409,10 +458,10 @@ export async function confirmTreasuryCompletionAction(
     .single()
 
   if (txCheck?.transaction_type === 'INFLOW') {
-    // For INFLOW the mock adapter writes a new investments row with an EZ-ROLLOVER-* reference.
+    // For INFLOW the mock adapter writes a new investments row with an EZ-INV-* reference.
     // Look up the most recent investment created by this transaction's execution
     // (identified by source_transaction_id stored in the mock's external_reference prefix).
-    const sourcePrefix = `EZ-ROLLOVER-${transactionId.slice(0, 8).toUpperCase()}`
+    const sourcePrefix = `EZ-INV-${transactionId.slice(0, 8).toUpperCase()}`
     const { data: newInvestment } = await supabase
       .from('investments')
       .select('external_reference, status')

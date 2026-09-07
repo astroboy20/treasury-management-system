@@ -274,9 +274,33 @@ export async function prepareVoucherAction(
         break
       }
 
-      // REVERSAL, SAVINGS_FUNDS_OUT, CALL_FUNDS_OUT, CMS_FUNDS_OUT —
-      // no calculation engine call required; the RPC handles any internal
-      // arithmetic. Snapshot remains null.
+      // SAVINGS_FUNDS_OUT, CALL_FUNDS_OUT, CMS_FUNDS_OUT —
+      // Per SOP and Req 38, available_balance is sourced from the investment
+      // verification snapshot (not calculated). Build a lightweight snapshot
+      // capturing the available_balance so it is persisted in
+      // vouchers.calculation_snapshot for auditability (Req 24.2, 38.1, 38.4).
+      // No interest calculation formula is applied here (Req 38.4).
+      case 'SAVINGS_FUNDS_OUT':
+      case 'CALL_FUNDS_OUT':
+      case 'CMS_FUNDS_OUT': {
+        const availableBalance = String(investmentSnapshot.available_amount)
+        calculationSnapshot = {
+          rule: 'FUNDS_OUT_AVAILABLE_BALANCE' as import('@/lib/services/calculation.service').CalculationRule,
+          inputs: {
+            available_balance: availableBalance,
+            source: 'INVESTMENT_VERIFICATION_SNAPSHOT',
+            transaction_type: txType,
+          },
+          outputs: {
+            available_balance: availableBalance,
+          },
+          calculated_at: new Date().toISOString(),
+        }
+        break
+      }
+
+      // REVERSAL — no calculation engine call required; the RPC handles any
+      // internal arithmetic. Snapshot remains null.
       //
       // INTERNAL_TRANSFER: build a no-charge snapshot (transfer_charge = 0,
       // is_internal = true). Balance check is enforced by the server action (step 6b)
@@ -356,6 +380,25 @@ export async function prepareVoucherAction(
   if (txType === 'INFLOW' && parsed.data.voucherType === 'FUNDS_IN') {
     const inflowData = parsed.data as import('@/lib/schemas/voucher.schema').FundsInVoucherInput
     voucherData.net_amount = inflowData.amount
+  }
+
+  // 8b-savings. For SAVINGS/CALL/CMS Funds-Out: map 'availableBalance' → 'available_balance'
+  //     so the prepare_voucher RPC writes it to vouchers.available_balance (Req 38.1, 38.2).
+  //     net_amount is also set to the same value (no deductions for these types per SOP).
+  if (
+    (txType === 'SAVINGS_FUNDS_OUT' || txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT') &&
+    parsed.data.voucherType === 'FUNDS_OUT'
+  ) {
+    const savingsData = parsed.data as import('@/lib/schemas/voucher.schema').FundsOutVoucherInput
+    const availBal = savingsData.availableBalance ?? String(investmentSnapshot.available_amount)
+    voucherData.available_balance = availBal
+    // net_amount mirrors available_balance for these types (Req 38.2 — no principal/interest split)
+    voucherData.net_amount = availBal
+    // server-enforced: override principal/interest/wht/charge to zero (Req 38.4)
+    voucherData.principal = '0'
+    voucherData.interest = '0'
+    voucherData.wht = '0'
+    voucherData.charge = '0'
   }
 
   // 8c. For THIRD_PARTY_PAYMENT external transfers: validate all 6 PI fields

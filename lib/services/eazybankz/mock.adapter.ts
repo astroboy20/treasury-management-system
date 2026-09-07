@@ -59,13 +59,13 @@ class MockEazybankzAdapter implements EazybankzAdapter {
    * the rolled investment exists in the mirror database.
    * Phase 6: this will be replaced by a live HTTP call to Eazybankz.
    *
-   * Returns an external_reference in the format EZ-ROLLOVER-<uuid-prefix>.
+   * Returns an external_reference in the format EZ-INV-<uuid-prefix>.
    */
   async createInvestment(input: CreateInvestmentInput): Promise<CreateInvestmentResult> {
     const supabase = await createClient()
 
     // Generate a mock external reference
-    const externalReference = `EZ-ROLLOVER-${input.sourceTransactionId.slice(0, 8).toUpperCase()}`
+    const externalReference = `EZ-INV-${input.sourceTransactionId.slice(0, 8).toUpperCase()}`
 
     const { error } = await supabase.from('investments').insert({
       customer_id: input.customerId,

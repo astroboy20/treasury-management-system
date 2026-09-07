@@ -438,25 +438,25 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - On execution: `eazybankzAdapter.reverseTransaction()`.
     - _Requirements: 22.1, 22.4, 25.1, 25.2, 25.3, 25.4, 25.5_
 
-  - [ ] 3.17 Inflow scenario
+  - [x] 3.17 Inflow scenario
     - Support `transaction_type: 'INFLOW'`.
     - Generate `FUNDS_IN` voucher: customer name, amount, rate, tenor, effective date, maturity date.
     - On execution: `eazybankzAdapter.createInvestment()` to create new investment record.
     - On treasury completion: verify new investment exists in adapter before marking COMPLETED.
     - _Requirements: 23.1, 23.2, 23.3_
 
-  - [ ] 3.18 Savings Funds-Out scenario
+  - [x] 3.18 Savings Funds-Out scenario
     - Support `transaction_type: 'SAVINGS_FUNDS_OUT'`.
     - Step 4 investment verification required; `available_balance` sourced from `investment_verifications` snapshot (not calculated).
     - Generate `FUNDS_OUT` voucher with `available_balance` as primary field, transfer date, remarks.
     - On execution: `eazybankzAdapter.updateInvestment()` to record payment and update balance.
     - _Requirements: 24.1, 24.2, 24.3, 38.1, 38.2, 38.3, 38.4_
 
-  - [ ] 3.19 Call Funds-Out scenario
+  - [x] 3.19 Call Funds-Out scenario
     - Support `transaction_type: 'CALL_FUNDS_OUT'` — same voucher layout as Savings Funds-Out.
     - _Requirements: 24.1, 24.2, 24.3, 38.1, 38.2_
 
-  - [ ] 3.20 CMS Funds-Out scenario
+  - [x] 3.20 CMS Funds-Out scenario
     - Support `transaction_type: 'CMS_FUNDS_OUT'` — same voucher layout as Savings Funds-Out.
     - _Requirements: 24.1, 24.2, 24.3, 38.1, 38.2_
 
@@ -465,7 +465,7 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 4. Phase 4 — Operations Queue + Treasury Completion
-  - [ ] 4.1 Create Operations queue page `/operations`
+  - [x] 4.1 Create Operations queue page `/operations`
     - Create `app/(protected)/operations/page.tsx` as a server component.
     - Visible only to `OPERATIONS` role (enforced in layout/server component; redirect otherwise).
     - Query `treasury_transactions WHERE status = 'MD_APPROVED'` ordered by `sla_due_at ASC`.
@@ -473,12 +473,12 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Each row links to the transaction workspace.
     - _Requirements: 14.1, 14.2_
 
-  - [ ] 4.2 Create `lib/actions/operations.actions.ts`
+  - [x] 4.2 Create `lib/actions/operations.actions.ts`
     - Implement `executeTransactionAction(transactionId, input: ExecutionInput)`: Zod-validate (status, external reference, execution notes), `getUser()`, `resolveUserRole()`, enforce OPERATIONS, call `supabase.rpc('execute_transaction', {...})`, `revalidatePath('/operations')`, return result.
     - Implement `confirmTreasuryCompletionAction(transactionId)`: enforce TREASURY_OFFICER, call `supabase.rpc('confirm_treasury_completion', {...})`, `revalidatePath`, return result.
     - _Requirements: 14.3, 14.4, 14.5, 15.2, 15.4_
 
-  - [ ] 4.3 Create Operations execution form in the transaction workspace
+  - [x] 4.3 Create Operations execution form in the transaction workspace
     - Add an Operations execution panel within the transaction workspace (visible only when `status = 'MD_APPROVED'` AND `currentUser.role = 'OPERATIONS'`).
     - Fields: execution status (SUCCESS / FAILED / PARTIAL), external reference, execution notes.
     - Use React Hook Form + Zod.

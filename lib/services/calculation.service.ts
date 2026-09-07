@@ -56,6 +56,7 @@ export type CalculationRule =
   | 'ANNIVERSARY_PAYMENT'
   | 'INTERNAL_TRANSFER_NO_CHARGE'
   | 'FUNDS_IN'
+  | 'FUNDS_OUT_AVAILABLE_BALANCE'
 
 // ─── Rollover type union (matches PostgreSQL CHECK constraint) ────────────────
 
