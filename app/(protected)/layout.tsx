@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { getAuthenticatedUser, getProfile, resolveUserRole } from '@/lib/services/auth.service'
+import { getUnreadCount, getRecentNotifications } from '@/lib/services/notification.service'
 import AppShell from '@/components/layout/AppShell'
 
 export default async function ProtectedLayout({
@@ -14,9 +15,11 @@ export default async function ProtectedLayout({
     redirect('/auth/login')
   }
 
-  const [profile, role] = await Promise.all([
+  const [profile, role, notifications, unreadCount] = await Promise.all([
     getProfile(user.id),
     resolveUserRole(user.id),
+    getRecentNotifications(user.id, 10),
+    getUnreadCount(user.id),
   ])
 
   // Role not yet assigned — show pending activation screen
@@ -46,6 +49,8 @@ export default async function ProtectedLayout({
       user={{ id: user.id, email: user.email ?? '' }}
       profile={profile}
       role={role}
+      initialNotifications={notifications}
+      initialUnreadCount={unreadCount}
     >
       {children}
     </AppShell>

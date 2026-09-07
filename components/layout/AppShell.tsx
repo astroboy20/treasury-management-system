@@ -4,9 +4,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import {
-  Bell,
   ChevronDown,
   ClipboardCheck,
+  Clock,
+  Cog,
   FileText,
   LayoutDashboard,
   LogOut,
@@ -14,15 +15,18 @@ import {
   Settings,
   ShieldCheck,
   X,
-  Cog,
 } from 'lucide-react'
 import { signOut } from '@/lib/supabase/client'
 import type { Profile } from '@/lib/services/auth.service'
+import { NotificationBell } from '@/components/treasury/NotificationBell'
+import type { Notification } from '@/lib/services/notification.service'
 
 interface AppShellProps {
   user: { id: string; email: string }
   profile: Profile | null
   role: string
+  initialNotifications: Notification[]
+  initialUnreadCount: number
   children: React.ReactNode
 }
 
@@ -38,10 +42,11 @@ const baseNavItems = [
 // Role-specific nav additions
 const roleNavItems: Record<string, { label: string; href: string; icon: React.ElementType }[]> = {
   OPERATIONS: [
-    { label: 'Operations', href: '/operations', icon: Cog },
+    { label: 'Operations', href: '/operations',       icon: Cog },
   ],
   ADMIN: [
-    { label: 'Admin',      href: '/admin',      icon: Settings },
+    { label: 'Users',      href: '/admin',            icon: Settings },
+    { label: 'SLA config', href: '/admin/sla-config', icon: Clock },
   ],
 }
 
@@ -68,7 +73,7 @@ function getInitials(name: string | null | undefined): string {
     .slice(0, 2)
 }
 
-export default function AppShell({ user, profile, role, children }: AppShellProps) {
+export default function AppShell({ user, profile, role, initialNotifications, initialUnreadCount, children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
 
@@ -186,11 +191,12 @@ export default function AppShell({ user, profile, role, children }: AppShellProp
 
           {/* Right: notifications + profile */}
           <div className="flex items-center gap-4">
-            {/* Notification bell — wired to Realtime in Phase 7 */}
-            <button className="relative text-muted-foreground transition-colors hover:text-foreground active:scale-[.97]">
-              <Bell className="size-5" />
-              {/* Badge placeholder — populated in Phase 7 */}
-            </button>
+            {/* Notification bell — wired to Supabase Realtime */}
+            <NotificationBell
+              userId={user.id}
+              initialNotifications={initialNotifications}
+              initialUnreadCount={initialUnreadCount}
+            />
 
             {/* Profile pill */}
             <div className="flex items-center gap-3 border-l border-border pl-4">

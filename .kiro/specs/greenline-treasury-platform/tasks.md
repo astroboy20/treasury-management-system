@@ -584,29 +584,29 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Add error path: when adapter throws `EazybankzError`, surface via Sonner toast and write `OPERATIONS_COMPLETED` with `execution_status: 'FAILED'`; do not transition to TREASURY_CONFIRMED.
     - _Requirements: 30.5_
 
-  - [ ]* 6.6 Write property test — mock adapter returns consistent data for all customers A–R
+  - [x] 6.6 Write property test — mock adapter returns consistent data for all customers A–R
     - **Property 3: For every seeded customer A–R, `getInvestment()` returns a value with the correct shape and matches the seed principal/rate values**
     - Generate the 18 customer external_reference IDs; assert each returns a valid `EazybankzInvestment` with non-null fields and matching financial values.
     - _Requirements: 30.2, 39.3_
 
-  - [ ]* 6.7 Write property test — adapter interface contract
+  - [x] 6.7 Write property test — adapter interface contract
     - **Property 4: All `EazybankzAdapter` methods return defined shapes for valid inputs**
     - For any `createInvestment(data)` call with valid fields, the returned object must satisfy the `EazybankzInvestment` interface schema (all required fields present, monetary fields are numeric-string parseable).
     - _Requirements: 30.1, 30.3_
 
-  - [ ] 6.8 Checkpoint — Phase 6 verification
+  - [x] 6.8 Checkpoint — Phase 6 verification
     - Verify all 18 scenario customers retrieve correct Eazybankz data at Step 4.
     - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 7. Phase 7 — Hardening
-  - [ ] 7.1 Add admin user management page `/admin/users`
+  - [x] 7.1 Add admin user management page `/admin/users`
     - Create `app/(protected)/admin/page.tsx` as a server component; accessible to `ADMIN` role only.
     - List all users from `profiles JOIN user_roles JOIN roles`.
     - Actions: assign role (INSERT into `user_roles`), revoke role (DELETE from `user_roles`), deactivate user (`profiles.is_active = false`).
     - All mutations via server actions that re-check `ADMIN` role.
     - _Requirements: 5.2 (ADMIN permissions)_
 
-  - [ ] 7.2 Add SLA config page `/admin/sla-config`
+  - [x] 7.2 Add SLA config page `/admin/sla-config`
     - Create `app/(protected)/admin/sla-config/page.tsx`.
     - Display current `sla_config` rows (one per transaction type).
     - Allow ADMIN to update `sla_hours` per type; save via server action that updates `sla_config`.
