@@ -486,13 +486,13 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Enforce idempotency: disable the form once an `operations_executions` record exists for this transaction.
     - _Requirements: 14.3, 14.6, 33.3_
 
-  - [ ] 4.4 Create Treasury completion queue in Treasury Officer's view
+  - [x] 4.4 Create Treasury completion queue in Treasury Officer's view
     - Add a "Pending completion" section in the transaction workspace (visible only when `status = 'OPERATIONS_COMPLETED'` AND `currentUser.role = 'TREASURY_OFFICER'`).
     - "Confirm Completion" button calls `confirmTreasuryCompletionAction`.
     - Show toast on success; workspace auto-refreshes to show COMPLETED status.
     - _Requirements: 15.1, 15.2, 15.3_
 
-  - [ ] 4.5 Wire Operations execution to Eazybankz adapter calls
+  - [x] 4.5 Wire Operations execution to Eazybankz adapter calls
     - In `executeTransactionAction`, after the RPC succeeds, call the appropriate `eazybankzAdapter` method based on `transaction_type`:
       - `ROLLOVER` → `createInvestment()`
       - `MATURITY_TERMINATION` → `updateInvestment({ status: 'TERMINATED' })`
@@ -505,12 +505,12 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - On adapter error: write audit event with failure details; surface error via Sonner toast.
     - _Requirements: 17.7, 18.3, 19.5, 20.4, 22.3, 23.2, 24.3, 25.3, 30.5_
 
-  - [ ] 4.6 Checkpoint — Phase 4 verification
+  - [x] 4.6 Checkpoint — Phase 4 verification
     - A full end-to-end flow (create → 6 steps → 5 approvals → Operations execute → Treasury confirm) should reach COMPLETED status.
     - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 5. Phase 5 — Audit Trail + Search + Reporting
-  - [ ] 5.1 Enhance `/audit` page with real audit data
+  - [x] 5.1 Enhance `/audit` page with real audit data
     - Rewrite `app/(protected)/audit/page.tsx` as a server component.
     - Visible to `AUDIT` and `ADMIN` roles only.
     - Query `audit_events` with filter controls: transaction reference (text), event type (multi-select), actor name, date range.

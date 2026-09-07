@@ -13,6 +13,7 @@ import Step4InvestmentVerification from './_components/Step4InvestmentVerificati
 import Step5VoucherGeneration from './_components/Step5VoucherGeneration'
 import Step6ApprovalChain from './_components/Step6ApprovalChain'
 import OperationsExecutionPanel from './_components/OperationsExecutionPanel'
+import TreasuryCompletionPanel from './_components/TreasuryCompletionPanel'
 import { eazybankzAdapter } from '@/lib/services/eazybankz'
 import type { StepMeta } from '@/lib/services/workflow.service'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
@@ -335,6 +336,55 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
                   transactionStatus={workspace.transaction.status}
                   operationsExecution={workspace.operationsExecution}
                   canAct={userRole === 'OPERATIONS' || userRole === 'ADMIN'}
+                />
+              </div>
+            </section>
+          )}
+
+          {/* Treasury completion confirmation — visible once Operations has completed (Req 15.1, 15.2, 15.3) */}
+          {(workspace.transaction.status === 'OPERATIONS_COMPLETED' ||
+            workspace.transaction.status === 'TREASURY_CONFIRMED' ||
+            workspace.transaction.status === 'COMPLETED') && (
+            <section
+              aria-label="Treasury completion confirmation"
+              className="rounded-xl border border-border bg-background"
+            >
+              {/* Section header */}
+              <div className="flex items-center gap-3 border-b border-border px-5 py-4 sm:px-6">
+                <span
+                  className={[
+                    'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                    workspace.transaction.status === 'TREASURY_CONFIRMED' ||
+                    workspace.transaction.status === 'COMPLETED'
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-primary text-primary-foreground',
+                  ].join(' ')}
+                  aria-hidden
+                >
+                  {workspace.transaction.status === 'TREASURY_CONFIRMED' ||
+                  workspace.transaction.status === 'COMPLETED'
+                    ? '✓'
+                    : '8'}
+                </span>
+                <span className="flex-1 text-sm font-medium">Treasury Completion</span>
+                {workspace.transaction.status === 'TREASURY_CONFIRMED' ||
+                workspace.transaction.status === 'COMPLETED' ? (
+                  <span className="text-xs text-muted-foreground">Confirmed</span>
+                ) : (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                    Pending confirmation
+                  </span>
+                )}
+              </div>
+              {/* Panel content */}
+              <div className="px-5 py-4 sm:px-6">
+                <TreasuryCompletionPanel
+                  transactionId={workspace.transaction.id}
+                  transactionStatus={workspace.transaction.status}
+                  canAct={userRole === 'TREASURY_OFFICER' || userRole === 'ADMIN'}
+                  operationsCompletedAt={
+                    workspace.operationsExecution?.executed_at ?? null
+                  }
                 />
               </div>
             </section>

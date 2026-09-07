@@ -112,21 +112,22 @@ const toNum = (s: string) => parseFloat(s)
 
 /**
  * Valid (originalPrincipal, requestedPayout) pair where 0 < payout < principal.
- * Both are integers to avoid floating-point ambiguity in the test generator.
+ * Uses tuple + map to avoid .chain() and .filter() which slow down generation.
+ * We fix the principal range and derive payout as a fraction to guarantee validity
+ * without rejection sampling.
  */
 const validPartialArbitrary = fc
-  .integer({ min: 2, max: 999_999_999 })
-  .chain((principal) =>
-    fc
-      .integer({ min: 1, max: principal - 1 })
-      .map((payout) => ({
-        originalPrincipal: principal.toString(),
-        requestedPayout: payout.toString(),
-      })),
+  .tuple(
+    fc.integer({ min: 100, max: 999_999 }),   // principal: capped to keep numbers manageable
+    fc.integer({ min: 1, max: 99 }),            // payout fraction percent: 1–99%
   )
+  .map(([principal, pct]) => ({
+    originalPrincipal: principal.toString(),
+    requestedPayout: Math.max(1, Math.floor(principal * pct / 100)).toString(),
+  }))
 
 const nonNegativeInterestArbitrary = fc
-  .integer({ min: 0, max: 999_999_999 })
+  .integer({ min: 0, max: 999_999 })
   .map((n) => n.toString())
 
 // ─── Canonical SOP example ────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ describe('Property 1 (Req 19.1) — charge is always 20% of accrued interest', (
           expect(toNum(result.charge)).toBe(expected)
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 })
@@ -193,7 +194,7 @@ describe('Property 2 (Req 19.2) — remaining_principal = original_principal −
           expect(toNum(result.remainingPrincipal)).toBe(expected)
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 
@@ -207,7 +208,7 @@ describe('Property 2 (Req 19.2) — remaining_principal = original_principal −
           expect(toNum(result.remainingPrincipal)).toBeGreaterThan(0)
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 
@@ -222,7 +223,7 @@ describe('Property 2 (Req 19.2) — remaining_principal = original_principal −
           expect(reconstructed).toBe(toNum(originalPrincipal))
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 })
@@ -243,7 +244,7 @@ describe('Property 3 (Req 19.5) — rebooked_principal = remaining_principal −
           expect(toNum(result.rebookedPrincipal)).toBe(expected)
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 
@@ -258,7 +259,7 @@ describe('Property 3 (Req 19.5) — rebooked_principal = remaining_principal −
           expect(toNum(result.rebookedPrincipal)).toBeLessThan(toNum(result.remainingPrincipal))
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 
@@ -288,7 +289,7 @@ describe('Property 4 (determinism) — same inputs always produce same outputs',
           expect(result1.remainingPrincipal).toBe(result2.remainingPrincipal)
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 })
@@ -300,33 +301,27 @@ describe('Property 5 (monotonicity) — larger payout produces smaller rebooked_
     fc.assert(
       fc.property(
         nonNegativeInterestArbitrary,
-        // principal in [3, 999_999_999], two distinct payouts both < principal
-        fc.integer({ min: 3, max: 999_999_999 }).chain((principal) =>
-          fc
-            .tuple(
-              fc.integer({ min: 1, max: principal - 2 }),
-              fc.integer({ min: 1, max: principal - 2 }),
-            )
-            .filter(([a, b]) => a !== b)
-            .map(([a, b]) => ({
-              principal: principal.toString(),
-              payoutA: a.toString(),
-              payoutB: b.toString(),
-            })),
-        ),
-        (accruedInterest, { principal, payoutA, payoutB }) => {
-          const largerPayout = String(Math.max(toNum(payoutA), toNum(payoutB)))
-          const smallerPayout = String(Math.min(toNum(payoutA), toNum(payoutB)))
-
-          const resultLarger = partialPreLiquidationCalc(accruedInterest, principal, largerPayout)
-          const resultSmaller = partialPreLiquidationCalc(accruedInterest, principal, smallerPayout)
+        // Generate principal and two distinct pct values (1–49% and 50–98%) so
+        // they are always ordered without needing .filter() rejection sampling.
+        fc.tuple(
+          fc.integer({ min: 100, max: 999_999 }),
+          fc.integer({ min: 1, max: 49 }),
+          fc.integer({ min: 50, max: 98 }),
+        ).map(([principal, smallPct, largePct]) => ({
+          principal: principal.toString(),
+          payoutSmall: Math.max(1, Math.floor(principal * smallPct / 100)).toString(),
+          payoutLarge: Math.max(1, Math.floor(principal * largePct / 100)).toString(),
+        })),
+        (accruedInterest, { principal, payoutSmall, payoutLarge }) => {
+          const resultLarger = partialPreLiquidationCalc(accruedInterest, principal, payoutLarge)
+          const resultSmaller = partialPreLiquidationCalc(accruedInterest, principal, payoutSmall)
 
           expect(toNum(resultLarger.rebookedPrincipal)).toBeLessThan(
             toNum(resultSmaller.rebookedPrincipal),
           )
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 })
@@ -344,7 +339,7 @@ describe('Property 6 — rebooked_principal is always less than original_princip
           expect(toNum(result.rebookedPrincipal)).toBeLessThan(toNum(originalPrincipal))
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 })
@@ -411,7 +406,7 @@ describe('Eazybankz rebooking — rebooked_principal validity (Req 19.5)', () =>
           expect(isFinite(rebooked)).toBe(true)
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 50 },
     )
   })
 

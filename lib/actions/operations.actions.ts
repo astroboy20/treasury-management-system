@@ -33,12 +33,12 @@ export interface ExecutionInput {
  *   reads the rollover_details row and calls eazybankzAdapter.createInvestment()
  *   to book the new rolled investment in the mirror system.
  *
- * Requirements: 14.3, 14.4, 14.5, 14.6, 17.7, 5.1, 5.3
+ * Requirements: 14.3, 14.4, 14.5, 14.6, 17.7, 18.3, 19.5, 20.4, 22.3, 23.2, 24.3, 25.3, 30.5, 5.1, 5.3
  */
 export async function executeTransactionAction(
   transactionId: string,
   input: ExecutionInput,
-): Promise<ActionResult<{ executionId: string }>> {
+): Promise<ActionResult<{ executionId: string; adapterWarning: string | null }>> {
   // 1. Basic input validation
   if (!transactionId || typeof transactionId !== 'string') {
     return { success: false, error: 'Invalid transaction ID.' }
@@ -86,6 +86,9 @@ export async function executeTransactionAction(
 
   // 6. Post-execution Eazybankz adapter calls (Req 18.3, 17.7)
   //    Only run for SUCCESS executions to avoid side-effects on failed/partial runs.
+  //    adapterWarning is set if the adapter call fails so the caller can surface it via toast.
+  let adapterWarning: string | null = null
+
   if (input.executionStatus === 'SUCCESS') {
     // Load the transaction to check its type and related data
     const { data: txData } = await supabase
@@ -381,16 +384,46 @@ export async function executeTransactionAction(
           }
 
           default:
-            // Other transaction types are handled in later phases (4.5).
+            // All transaction types with Eazybankz implications are handled above.
+            // THIRD_PARTY_PAYMENT is a pure payment — no investment record to update.
             break
         }
       } catch (adapterError) {
-        // Log but don't fail the execution — the Eazybankz call is best-effort
-        // in Phase 1–5; Phase 6 adds retry/compensation logic (Req 30.5).
-        console.error(
-          '[executeTransactionAction] Eazybankz adapter call failed:',
-          adapterError instanceof Error ? adapterError.message : adapterError,
-        )
+        // The DB execution succeeded — the Eazybankz mirror sync is best-effort in Phase 1–5.
+        // Write an audit event so operators can identify and replay the failed sync (Req 30.5).
+        const errorMessage =
+          adapterError instanceof Error ? adapterError.message : String(adapterError)
+
+        console.error('[executeTransactionAction] Eazybankz adapter call failed:', errorMessage)
+
+        // Write EAZYBANKZ_SYNC_FAILED audit event so the failure is visible in the audit
+        // timeline and operators can action it (Req 30.5).
+        try {
+          await supabase.from('audit_events').insert({
+            transaction_id: transactionId,
+            actor_id: user.id,
+            event_type: 'EAZYBANKZ_SYNC_FAILED',
+            from_status: 'OPERATIONS_COMPLETED',
+            to_status: 'OPERATIONS_COMPLETED',
+            metadata: {
+              error: errorMessage,
+              transaction_type: txData.transaction_type,
+              note: 'Eazybankz mirror sync failed post-execution. Manual reconciliation required.',
+            },
+          })
+        } catch (auditWriteError) {
+          // Audit write failure is non-fatal — log it but continue.
+          console.error(
+            '[executeTransactionAction] Failed to write EAZYBANKZ_SYNC_FAILED audit event:',
+            auditWriteError instanceof Error ? auditWriteError.message : auditWriteError,
+          )
+        }
+
+        // Surface the failure back to the caller as a warning so the UI can show a
+        // Sonner toast explaining the partial success (execution recorded, mirror sync failed).
+        adapterWarning =
+          `Execution recorded, but the Eazybankz mirror sync failed: ${errorMessage}. ` +
+          `An audit event has been logged for reconciliation.`
       }
     }
   }
@@ -404,6 +437,7 @@ export async function executeTransactionAction(
     success: true,
     data: {
       executionId: result.execution_id,
+      adapterWarning: adapterWarning ?? null,
     },
   }
 }
