@@ -173,7 +173,7 @@ export default async function TransactionAuditPage({ params }: PageProps) {
       <div className="mb-6">
         <Link
           href="/audit"
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground transition-colors"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
           Back to audit trail

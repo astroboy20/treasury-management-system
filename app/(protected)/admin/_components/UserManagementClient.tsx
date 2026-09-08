@@ -267,7 +267,7 @@ export function UserManagementClient({ initialUsers, roles, currentUserId }: Pro
                 return (
                   <TableRow
                     key={user.id}
-                    className="border-t border-border transition-colors duration-150 hover:bg-muted/30"
+                    className="border-t border-border transition-colors duration-150 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/30"
                   >
                     {/* User */}
                     <TableCell className="px-5 py-4">

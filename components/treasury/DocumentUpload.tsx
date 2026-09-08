@@ -7,14 +7,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { uploadDocumentAction } from '@/lib/actions/document.actions'
 import {
-  uploadDocumentAction,
   ALLOWED_MIME_TYPES,
   ALLOWED_FILE_TYPES_LABEL,
   MAX_FILE_SIZE_BYTES,
   DOCUMENT_TYPES,
   type DocumentType,
-} from '@/lib/actions/document.actions'
+} from '@/lib/constants/document.constants'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 

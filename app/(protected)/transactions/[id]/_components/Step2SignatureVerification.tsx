@@ -135,7 +135,7 @@ function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
             : 'border-border bg-muted text-muted-foreground',
           disabled
             ? 'cursor-not-allowed opacity-60'
-            : 'cursor-pointer hover:border-emerald-400',
+            : 'cursor-pointer [@media(hover:hover)_and_(pointer:fine)]:hover:border-emerald-400',
         ].join(' ')}
       >
         {isPassed ? (

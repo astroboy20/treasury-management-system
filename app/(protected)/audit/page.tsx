@@ -249,7 +249,7 @@ export default async function AuditPage({ searchParams }: PageProps) {
                 {events.map((event) => (
                   <tr
                     key={event.id}
-                    className="border-t border-border transition-colors duration-150 hover:bg-muted/40"
+                    className="border-t border-border transition-colors duration-150 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40"
                   >
                     {/* ID */}
                     <td className="px-5 py-4">
