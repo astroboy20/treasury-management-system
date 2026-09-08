@@ -48,7 +48,7 @@ export default function PaginationBar({
   const canNext = page < totalPages
 
   const btnBase =
-    'inline-flex items-center justify-center size-8 rounded-md text-sm text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted hover:text-foreground motion-safe:active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40'
+    'inline-flex items-center justify-center size-8 rounded-md text-sm text-muted-foreground ring-1 ring-border transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40'
 
   if (variant === 'compact') {
     return (
@@ -121,7 +121,7 @@ export default function PaginationBar({
               aria-current={p === page ? 'page' : undefined}
               className={`${btnBase} ${
                 p === page
-                  ? 'bg-primary text-primary-foreground ring-primary hover:bg-primary'
+                  ? 'bg-primary text-primary-foreground ring-primary [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary'
                   : ''
               }`}
             >

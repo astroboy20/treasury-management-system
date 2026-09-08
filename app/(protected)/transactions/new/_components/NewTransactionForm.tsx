@@ -208,7 +208,7 @@ function CustomerCombobox({
                 setQuery('')
                 setOpen(false)
               }}
-              className={`flex cursor-pointer items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-muted ${
+              className={`flex cursor-pointer items-center justify-between px-3 py-2.5 text-sm transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted ${
                 c.id === value ? 'bg-muted font-medium' : ''
               }`}
             >
@@ -926,7 +926,7 @@ export default function NewTransactionForm({ customers }: Props) {
               className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
                 !isInternalTransferPayment
                   ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-input bg-background text-muted-foreground hover:bg-muted'
+                  : 'border-input bg-background text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted'
               }`}
             >
               External Transfer
@@ -946,7 +946,7 @@ export default function NewTransactionForm({ customers }: Props) {
               className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
                 isInternalTransferPayment
                   ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-input bg-background text-muted-foreground hover:bg-muted'
+                  : 'border-input bg-background text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted'
               }`}
             >
               Internal Transfer
