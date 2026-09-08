@@ -65,13 +65,27 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 // ─── Entry animation styles ───────────────────────────────────────────────────
 
+/*
+ * Opacity fade runs unconditionally — negligible vestibular impact.
+ * The translateY transform is only added when the user has NOT requested
+ * reduced motion, per Req 32.9.
+ */
 const PANEL_ANIMATION_STYLE = `
-  @keyframes fadeInPanel {
+  @keyframes invFadeIn {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .inv-panel { animation: none !important; }
+  @keyframes invFadeInFull {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .inv-panel {
+    animation: invFadeIn 200ms ease-out both;
+  }
+  @media (not (prefers-reduced-motion: reduce)) {
+    .inv-panel {
+      animation: invFadeInFull 200ms ease-out both;
+    }
   }
 `
 
@@ -240,7 +254,6 @@ export default function Step4InvestmentVerification({
     return (
       <div
         className="inv-panel"
-        style={{ animation: 'fadeInPanel 200ms ease-out both' }}
       >
         <style>{PANEL_ANIMATION_STYLE}</style>
         <SnapshotDisplay snapshot={investmentVerification} />
@@ -255,7 +268,6 @@ export default function Step4InvestmentVerification({
   return (
     <div
       className="inv-panel space-y-5"
-      style={{ animation: 'fadeInPanel 200ms ease-out both' }}
     >
       <style>{PANEL_ANIMATION_STYLE}</style>
 

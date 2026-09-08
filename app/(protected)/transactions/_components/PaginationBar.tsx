@@ -48,7 +48,7 @@ export default function PaginationBar({
   const canNext = page < totalPages
 
   const btnBase =
-    'inline-flex items-center justify-center size-8 rounded-md text-sm text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted hover:text-foreground active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40'
+    'inline-flex items-center justify-center size-8 rounded-md text-sm text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted hover:text-foreground motion-safe:active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40'
 
   if (variant === 'compact') {
     return (

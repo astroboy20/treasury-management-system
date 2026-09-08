@@ -613,14 +613,14 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Dashboard and transaction creation use `sla_config` to compute `sla_due_at`.
     - _Requirements: 37.5_
 
-  - [ ] 7.3 Wire notification bell to Supabase Realtime
+  - [x] 7.3 Wire notification bell to Supabase Realtime
     - Create `components/treasury/NotificationBell.tsx` as a client component.
     - Subscribe to `notifications` table changes filtered by `recipient_id = auth.uid()`.
     - Show unread count badge via shadcn `Badge`.
     - Dropdown lists recent notifications; clicking one navigates to the transaction workspace and calls `markNotificationsRead(userId, transactionId)`.
     - _Requirements: 31.1, 31.2, 31.3, 31.4_
 
-  - [ ] 7.4 Wire document upload to Supabase Storage
+  - [x] 7.4 Wire document upload to Supabase Storage
     - Create `lib/actions/document.actions.ts`: `uploadDocumentAction(transactionId, file, documentType)`.
     - Validate file type (PDF, JPG, PNG) and size (max 10 MB) before upload; surface `<Alert>` on client for invalid files.
     - Upload to `transaction-documents` bucket at path `{transaction_id}/{document_type}/{timestamp}_{filename}`.
@@ -629,7 +629,7 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - On failure: Sonner toast with error message; retain partial state for retry.
     - _Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 27.6_
 
-  - [ ] 7.5 Verify all RLS policies with negative test scenarios
+  - [x] 7.5 Verify all RLS policies with negative test scenarios
     - Write integration tests (using Supabase test client or pgTAP) that execute each negative test from seed data:
       - `CUSTOMER_NEG_001` (signature mismatch): attempt to advance past Step 2 → expect rejection.
       - `CUSTOMER_NEG_002` (insufficient balance): attempt to prepare Transfer Slip → expect rejection.
@@ -638,27 +638,27 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
       - Attempt by OPERATIONS to approve at TREASURY stage → expect 403.
     - _Requirements: 2.3, 2.4, 5.3, 35.2_
 
-  - [ ] 7.6 Verify idempotency — double-submission tests
+  - [x] 7.6 Verify idempotency — double-submission tests
     - Write tests that submit the same approval action twice for the same `(transaction_id, stage)` and assert only one `approvals` row is created.
     - Write tests that call `executeTransactionAction` twice and assert only one `operations_executions` row is created.
     - _Requirements: 12.9, 14.6, 33.2, 33.3, 33.4_
 
-  - [ ] 7.7 Verify maker-checker enforcement
+  - [x] 7.7 Verify maker-checker enforcement
     - Write tests that create a transaction as `treasury_maker_01` then attempt to approve it at the TREASURY stage with the same user.
     - Assert the server action returns a 403 and no `approvals` row is created.
     - _Requirements: 5.4, 12.2_
 
-  - [ ] 7.8 Verify signature mismatch downstream lock
+  - [x] 7.8 Verify signature mismatch downstream lock
     - Write a test flow using `CUSTOMER_NEG_001`: record `SIGNATURE_FAILED` → attempt to call `recordCustomerConfirmationAction` → assert rejection.
     - Assert `<Alert>` lock indicator is rendered in the Step 3 panel when `signature_result = 'FAILED'`.
     - _Requirements: 8.3, 8.6_
 
-  - [ ] 7.9 Verify audit_events immutability
+  - [x] 7.9 Verify audit_events immutability
     - Write tests that attempt to UPDATE and DELETE an `audit_events` row using the authenticated Supabase client.
     - Assert both operations are rejected by RLS.
     - _Requirements: 1.5, 2.4, 28.5, 35.2_
 
-  - [ ] 7.10 Add `prefers-reduced-motion` CSS to all animated components
+  - [x] 7.10 Add `prefers-reduced-motion` CSS to all animated components
     - Audit `StepProgressTracker`, `AuditTimeline`, all voucher entry animations, sidebar transitions, and modal animations.
     - Wrap all `transform`-based keyframes and transitions in `@media (not (prefers-reduced-motion: reduce))`.
     - Retain opacity and color transitions unconditionally.

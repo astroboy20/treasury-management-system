@@ -153,7 +153,7 @@ export function NotificationBell({
   return (
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger
-        className="relative rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative rounded-md p-2 text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={
           unreadCount > 0
             ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`
@@ -178,7 +178,7 @@ export function NotificationBell({
           {unreadCount > 0 && (
             <button
               onClick={handleMarkAllRead}
-              className="text-xs text-primary hover:underline"
+              className="text-xs text-primary [@media(hover:hover)_and_(pointer:fine)]:hover:underline"
             >
               Mark all as read
             </button>
@@ -229,7 +229,7 @@ function NotificationItem({ notification, onClick, isLast }: NotificationItemPro
         onClick={onClick}
         className={`
           w-full px-4 py-3 text-left transition-colors
-          hover:bg-muted/60 active:scale-[0.99]
+          [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/60 motion-safe:active:scale-[0.99]
           ${!notification.is_read ? 'bg-primary/5' : ''}
         `}
       >

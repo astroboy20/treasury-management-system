@@ -1,6 +1,7 @@
 import { FileText, User, ExternalLink } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { SlaIndicator } from '@/components/treasury/SlaIndicator'
+import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 import { STATUS_TO_OWNER } from '@/lib/permissions/permissions'
 
@@ -10,6 +11,8 @@ interface WorkspaceSidebarProps {
   transaction: TransactionWorkspace['transaction']
   approvals:   TransactionWorkspace['approvals']
   documents:   TransactionWorkspace['documents']
+  /** Current user's role — used to gate the document upload UI (Req 27.6) */
+  userRole?:   string | null
 }
 
 // ─── Approval stage constants ─────────────────────────────────────────────────
@@ -105,13 +108,15 @@ function documentTypeLabel(raw: string): string {
  *   - SLA indicator (green/amber/red, computed server-side)
  *   - Approval chain summary
  *   - Linked documents with 60-minute signed URL links (per Req 27.3)
+ *   - Document upload panel for authorised roles (Req 27.1–27.6)
  *
- * Requirements: 16.3, 37.3
+ * Requirements: 16.3, 27.1–27.6, 37.3
  */
 export default async function WorkspaceSidebar({
   transaction,
   approvals,
   documents,
+  userRole,
 }: WorkspaceSidebarProps) {
   // Compute "now" server-side to avoid hydration mismatch in SlaIndicator
   const now = Date.now()
@@ -202,12 +207,14 @@ export default async function WorkspaceSidebar({
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Documents
         </h2>
+
+        {/* Document list */}
         {documentLinks.length === 0 ? (
-          <p className="text-xs italic text-muted-foreground">
+          <p className={`text-xs italic text-muted-foreground ${userRole && userRole !== 'CUSTOMER' ? 'mb-4' : ''}`}>
             No documents uploaded.
           </p>
         ) : (
-          <ul className="space-y-2.5" aria-label="Attached documents">
+          <ul className="mb-4 space-y-2.5" aria-label="Attached documents">
             {documentLinks.map((doc) => (
               <li key={doc.id} className="flex items-center gap-2">
                 <FileText
@@ -220,7 +227,7 @@ export default async function WorkspaceSidebar({
                       href={doc.signedUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 truncate text-xs text-primary underline-offset-2 hover:underline"
+                      className="inline-flex items-center gap-1 truncate text-xs text-primary underline-offset-2 [@media(hover:hover)_and_(pointer:fine)]:hover:underline"
                       aria-label={`Open ${documentTypeLabel(doc.document_type)} (opens in new tab)`}
                     >
                       <span className="truncate">
@@ -244,6 +251,21 @@ export default async function WorkspaceSidebar({
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Upload panel — visible to all staff roles (not CUSTOMER) (Req 27.6).
+            Terminal statuses still allow uploads so post-execution evidence
+            can be attached after the fact. */}
+        {userRole && userRole !== 'CUSTOMER' && (
+          <>
+            {documentLinks.length > 0 && (
+              <hr className="mb-4 border-border" />
+            )}
+            <p className="mb-2.5 text-xs font-medium text-muted-foreground">
+              Attach Document
+            </p>
+            <DocumentUpload transactionId={transaction.id} />
+          </>
         )}
       </section>
 

@@ -569,22 +569,31 @@ export function VoucherDisplay({
 
   return (
     <>
-      {/* Animation styles — scoped to this component */}
+      {/* Animation styles — scoped to this component.
+          Opacity fade runs unconditionally (negligible vestibular impact).
+          The translateY transform is gated on (not (prefers-reduced-motion: reduce))
+          so users who prefer reduced motion still see the fade but not the slide. */}
       <style>{`
-        @keyframes voucherFadeIn {
+        @keyframes voucherFadeInFull {
           from { opacity: 0; transform: translateY(6px); }
           to   { opacity: 1; transform: translateY(0); }
         }
-        @media (prefers-reduced-motion: reduce) {
-          .voucher-display-root { animation: none !important; transform: none !important; }
+        @keyframes voucherFadeInReduced {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        .voucher-display-root {
+          animation: voucherFadeInReduced 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
+        @media (not (prefers-reduced-motion: reduce)) {
+          .voucher-display-root {
+            animation: voucherFadeInFull 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+          }
         }
       `}</style>
 
       <div
         className="voucher-display-root space-y-4"
-        style={{
-          animation: 'voucherFadeIn 220ms cubic-bezier(0.23, 1, 0.32, 1) both',
-        }}
         role="region"
         aria-label={`Voucher ${voucher.voucher_number}`}
       >

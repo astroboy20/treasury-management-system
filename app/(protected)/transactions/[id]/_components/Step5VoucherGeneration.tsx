@@ -116,13 +116,25 @@ const SAVINGS_FUNDS_OUT_TYPES = new Set([
 
 // ─── Animation style ──────────────────────────────────────────────────────────
 
+// The panel uses an opacity-only fade for the reduced-motion path (no transform).
+// For full-motion, a subtle translateY is added via a separate keyframe.
+// Both are defined in globals.css / inline below so the transform guard is explicit.
 const PANEL_ANIMATION_STYLE = `
   @keyframes fadeInPanel {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .voucher-panel { animation: none !important; }
+  @keyframes fadeInPanelFull {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .voucher-panel {
+    animation: fadeInPanel 200ms ease-out both;
+  }
+  @media (not (prefers-reduced-motion: reduce)) {
+    .voucher-panel {
+      animation: fadeInPanelFull 200ms ease-out both;
+    }
   }
 `
 
@@ -1618,7 +1630,6 @@ export default function Step5VoucherGeneration({
     return (
       <div
         className="voucher-panel"
-        style={{ animation: 'fadeInPanel 200ms ease-out both' }}
       >
         <style>{PANEL_ANIMATION_STYLE}</style>
         <div className="flex items-center gap-2 mb-4">
@@ -1655,7 +1666,6 @@ export default function Step5VoucherGeneration({
   return (
     <div
       className="voucher-panel space-y-5"
-      style={{ animation: 'fadeInPanel 200ms ease-out both' }}
     >
       <style>{PANEL_ANIMATION_STYLE}</style>
 

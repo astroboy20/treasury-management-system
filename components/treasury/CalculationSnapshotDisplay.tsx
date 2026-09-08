@@ -237,25 +237,31 @@ export function CalculationSnapshotDisplay({
 
   return (
     <>
-      {/* Animation — scoped to this component */}
+      {/* Animation — scoped to this component.
+          Opacity fade runs unconditionally (negligible vestibular impact).
+          The translateY transform is gated on (not (prefers-reduced-motion: reduce))
+          so users who prefer reduced motion still see the fade but not the slide. */}
       <style>{`
-        @keyframes snapshotFadeIn {
+        @keyframes snapshotFadeInFull {
           from { opacity: 0; transform: translateY(4px); }
           to   { opacity: 1; transform: translateY(0); }
         }
-        @media (prefers-reduced-motion: reduce) {
+        @keyframes snapshotFadeInReduced {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        .calc-snapshot-root {
+          animation: snapshotFadeInReduced 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
+        @media (not (prefers-reduced-motion: reduce)) {
           .calc-snapshot-root {
-            animation: none !important;
-            transform: none !important;
+            animation: snapshotFadeInFull 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
           }
         }
       `}</style>
 
       <div
         className="calc-snapshot-root space-y-4"
-        style={{
-          animation: 'snapshotFadeIn 220ms cubic-bezier(0.23, 1, 0.32, 1) both',
-        }}
         role="region"
         aria-label="Calculation Snapshot"
       >

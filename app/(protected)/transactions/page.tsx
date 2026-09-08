@@ -218,7 +218,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         </div>
         <Link
           href="/transactions/new"
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-transform duration-150 hover:bg-primary/90 active:scale-[.97]"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary/90 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[.97]"
         >
           <Plus className="size-4" />
           New instruction
@@ -284,7 +284,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
                 <p className="text-sm text-muted-foreground">No transactions yet.</p>
                 <Link
                   href="/transactions/new"
-                  className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                  className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary [@media(hover:hover)_and_(pointer:fine)]:hover:underline"
                 >
                   <Plus className="size-4" />
                   Create the first instruction
@@ -317,7 +317,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
                   return (
                     <tr
                       key={tx.id}
-                      className="border-t border-border transition-colors duration-150 hover:bg-muted/40"
+                      className="border-t border-border transition-colors duration-150 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40"
                     >
                       <td className="px-5 py-4">
                         <span className="font-mono text-xs font-semibold text-primary">
@@ -345,7 +345,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
                         <Link
                           href={`/transactions/${tx.id}`}
                           aria-label={`Open transaction ${tx.transaction_reference}`}
-                          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[.97]"
+                          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97]"
                         >
                           <ArrowUpRight className="size-4" />
                         </Link>

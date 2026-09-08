@@ -45,7 +45,7 @@ export default async function NewTransactionPage() {
       {/* Back link */}
       <Link
         href="/transactions"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
       >
         <ArrowLeft className="size-4" />
         Back to transactions

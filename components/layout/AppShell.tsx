@@ -94,6 +94,7 @@ export default function AppShell({ user, profile, role, initialNotifications, in
           fixed inset-y-0 left-0 z-20 w-64 border-r border-border bg-background p-5
           transition-transform duration-200
           [transition-timing-function:cubic-bezier(0.23,1,0.32,1)]
+          motion-reduce:transition-none
           lg:translate-x-0
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
@@ -108,7 +109,7 @@ export default function AppShell({ user, profile, role, initialNotifications, in
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground active:scale-[.97]"
+            className="lg:hidden rounded-md p-1 text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97]"
             aria-label="Close navigation"
           >
             <X className="size-5" />
@@ -126,10 +127,9 @@ export default function AppShell({ user, profile, role, initialNotifications, in
                 onClick={() => setSidebarOpen(false)}
                 className={`
                   flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors
-                  @media (hover: hover) and (pointer: fine) { hover:bg-muted hover:text-foreground }
                   ${isActive
                     ? 'bg-primary/10 font-medium text-primary'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    : 'text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground'
                   }
                 `}
               >
@@ -152,10 +152,10 @@ export default function AppShell({ user, profile, role, initialNotifications, in
             </div>
           </div>
           <button
-            onClick={signOut}
+            onClick={() => signOut()}
             className="
               flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground
-              transition-colors hover:bg-muted hover:text-foreground active:scale-[.97]
+              transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97]
             "
           >
             <LogOut className="size-4" />
@@ -180,7 +180,7 @@ export default function AppShell({ user, profile, role, initialNotifications, in
           {/* Mobile menu button */}
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground active:scale-[.97]"
+            className="lg:hidden rounded-md p-1 text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97]"
             aria-label="Open navigation"
           >
             <Menu className="size-5" />

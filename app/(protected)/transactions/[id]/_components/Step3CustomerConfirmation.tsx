@@ -98,13 +98,27 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 // ─── Entry animation styles ───────────────────────────────────────────────────
 
+/*
+ * Opacity fade runs unconditionally — negligible vestibular impact.
+ * The translateY transform is only added when the user has NOT requested
+ * reduced motion, per Req 32.9.
+ */
 const PANEL_ANIMATION_STYLE = `
-  @keyframes fadeInPanel {
+  @keyframes confFadeIn {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .conf-panel { animation: none !important; }
+  @keyframes confFadeInFull {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .conf-panel {
+    animation: confFadeIn 200ms ease-out both;
+  }
+  @media (not (prefers-reduced-motion: reduce)) {
+    .conf-panel {
+      animation: confFadeInFull 200ms ease-out both;
+    }
   }
 `
 
@@ -194,7 +208,6 @@ export default function Step3CustomerConfirmation({
     return (
       <div
         className="conf-panel space-y-4"
-        style={{ animation: 'fadeInPanel 200ms ease-out both' }}
       >
         <style>{PANEL_ANIMATION_STYLE}</style>
 
@@ -251,7 +264,6 @@ export default function Step3CustomerConfirmation({
   return (
     <div
       className="conf-panel space-y-5"
-      style={{ animation: 'fadeInPanel 200ms ease-out both' }}
     >
       <style>{PANEL_ANIMATION_STYLE}</style>
 

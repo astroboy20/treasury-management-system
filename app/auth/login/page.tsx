@@ -73,7 +73,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           <Link
             href="/"
-            className="mb-14 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="mb-14 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
           >
             <ArrowLeft className="size-4" /> Back to home
           </Link>
@@ -86,7 +86,7 @@ export default function LoginPage() {
             <p className="mt-2 text-muted-foreground">Sign in to your First Marina Trust workspace.</p>
             <p className="mt-3 text-sm text-muted-foreground">
               New to First Marina Trust?{' '}
-              <Link href="/auth/sign-up" className="font-medium text-primary hover:underline">
+              <Link href="/auth/sign-up" className="font-medium text-primary [@media(hover:hover)_and_(pointer:fine)]:hover:underline">
                 Create an account
               </Link>
             </p>
@@ -126,7 +126,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-primary font-medium text-primary-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-primary-hover active:scale-[.97] disabled:opacity-60"
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-primary font-medium text-primary-foreground transition-colors duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary-hover motion-safe:[transition-property:transform,background-color] motion-safe:active:scale-[.97] disabled:opacity-60"
             >
               {loading ? 'Signing in…' : 'Sign in'}
               <ArrowUpRight className="size-4" />
@@ -135,7 +135,7 @@ export default function LoginPage() {
 
           <p className="mt-8 text-center text-sm text-muted-foreground">
             Need access?{' '}
-            <a href="mailto:access@firstmarinatrust.example" className="font-medium text-primary hover:underline">
+            <a href="mailto:access@firstmarinatrust.example" className="font-medium text-primary [@media(hover:hover)_and_(pointer:fine)]:hover:underline">
               Contact your administrator
             </a>
           </p>

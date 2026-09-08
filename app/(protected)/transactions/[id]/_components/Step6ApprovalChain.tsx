@@ -397,7 +397,7 @@ function ActiveRow({
               variant="outline"
               onClick={() => openDialog('REJECT')}
               disabled={submitting}
-              className="gap-1.5 text-destructive hover:text-destructive"
+              className="gap-1.5 text-destructive [@media(hover:hover)_and_(pointer:fine)]:hover:text-destructive"
             >
               <XCircle className="size-3.5" aria-hidden />
               Reject

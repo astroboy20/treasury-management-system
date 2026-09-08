@@ -278,7 +278,7 @@ export default async function AuditPage({ searchParams }: PageProps) {
                       {event.transaction_id && event.transaction_reference ? (
                         <Link
                           href={`/transactions/${event.transaction_id}`}
-                          className="font-mono text-xs font-semibold text-primary hover:underline"
+                          className="font-mono text-xs font-semibold text-primary [@media(hover:hover)_and_(pointer:fine)]:hover:underline"
                         >
                           {event.transaction_reference}
                         </Link>

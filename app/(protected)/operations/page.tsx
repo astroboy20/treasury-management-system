@@ -197,7 +197,7 @@ export default async function OperationsQueuePage() {
               {queue.map((tx) => (
                 <TableRow
                   key={tx.id}
-                  className="border-t border-border transition-colors duration-150 hover:bg-muted/40"
+                  className="border-t border-border transition-colors duration-150 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40"
                 >
                   {/* Reference */}
                   <TableCell className="px-5 py-4">
@@ -254,7 +254,7 @@ export default async function OperationsQueuePage() {
                     <Link
                       href={`/transactions/${tx.id}`}
                       aria-label={`Open transaction ${tx.transaction_reference}`}
-                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[.97]"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97]"
                     >
                       <ArrowUpRight className="size-4" />
                     </Link>

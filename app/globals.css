@@ -8,4 +8,25 @@
 html { background: var(--background); }
 body { @apply bg-background text-foreground font-sans; }
 button, a { -webkit-tap-highlight-color: transparent; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+@media (prefers-reduced-motion: reduce) {
+  /* Remove scroll animations unconditionally */
+  html { scroll-behavior: auto !important; }
+
+  /* Suppress transform-based motion. Opacity and color transitions are intentionally
+     preserved — they have negligible vestibular impact and communicate state changes
+     clearly (Req 32.9).
+     Components that define separate opacity-only and full-motion keyframes already
+     handle this per-component. This rule acts as a safety net for any third-party or
+     ad-hoc animations that include transform without a reduced-motion variant. */
+  *, *::before, *::after {
+    transform: none !important;
+    /* Do NOT suppress animation-name here — opacity-only keyframe animations
+       are retained so fade-in feedback remains visible for all users. */
+  }
+
+  /* Restrict transition-property so transform and filter transitions collapse
+     while opacity, color, and background transitions remain active. */
+  * {
+    transition-property: opacity, color, background-color, border-color, box-shadow !important;
+  }
+}

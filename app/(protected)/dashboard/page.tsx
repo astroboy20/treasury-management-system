@@ -292,7 +292,7 @@ export default async function DashboardPage() {
         </div>
         <Link
           href="/transactions/new"
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-transform duration-150 hover:bg-primary/90 active:scale-[.97]"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[.97]"
         >
           <Plus className="size-4" />
           New instruction
@@ -339,7 +339,7 @@ export default async function DashboardPage() {
             <p className="text-sm text-muted-foreground">No transactions yet.</p>
             <Link
               href="/transactions/new"
-              className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+              className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary [@media(hover:hover)_and_(pointer:fine)]:hover:underline"
             >
               <Plus className="size-4" />
               Create the first instruction

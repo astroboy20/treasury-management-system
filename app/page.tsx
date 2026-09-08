@@ -40,23 +40,23 @@ export default function Page() {
         <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
           <a
             href="#platform"
-            className="transition-colors hover:text-foreground"
+            className="transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
           >
             Platform
           </a>
           <a
             href="#controls"
-            className="transition-colors hover:text-foreground"
+            className="transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
           >
             Controls
           </a>
-          <a href="#access" className="transition-colors hover:text-foreground">
+          <a href="#access" className="transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground">
             Access
           </a>
         </nav>
         <Link
           href="/auth/login"
-          className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-transform duration-150 ease-out hover:bg-primary-hover active:scale-[.97]"
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary-hover motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[.97]"
         >
           Sign in <ArrowUpRight className="size-4" />
         </Link>
@@ -77,13 +77,13 @@ export default function Page() {
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link
               href="/auth/login"
-              className="inline-flex h-12 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform duration-150 ease-out hover:bg-primary-hover active:scale-[.97]"
+              className="inline-flex h-12 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary-hover motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[.97]"
             >
               Open workspace <ArrowUpRight className="size-4" />
             </Link>
             <a
               href="#platform"
-              className="inline-flex h-12 items-center rounded-lg border border-border px-5 text-sm font-medium transition-colors hover:bg-muted"
+              className="inline-flex h-12 items-center rounded-lg border border-border px-5 text-sm font-medium transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted"
             >
               Explore platform
             </a>
@@ -187,7 +187,7 @@ export default function Page() {
             {features.map(({ icon: Icon, title, text }) => (
               <article
                 key={title}
-                className="rounded-xl border border-border bg-background p-6 transition-transform duration-200 ease-out hover:-translate-y-1"
+                className="rounded-xl border border-border bg-background p-6 motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out motion-safe:hover:-translate-y-1"
               >
                 <Icon className="size-5 text-primary" />
                 <h3 className="mt-8 font-semibold">{title}</h3>

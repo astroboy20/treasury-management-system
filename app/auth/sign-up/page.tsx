@@ -56,7 +56,7 @@ export default function SignUpPage() {
         <div className="w-full max-w-md">
           <Link
             href="/auth/login"
-            className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
           >
             <ArrowLeft className="size-4" /> Back to sign in
           </Link>
@@ -131,7 +131,7 @@ export default function SignUpPage() {
             <button
               type="submit"
               disabled={loading}
-              className="h-12 w-full rounded-lg bg-primary px-4 font-medium text-primary-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-primary-hover active:scale-[.97] disabled:opacity-60"
+              className="h-12 w-full rounded-lg bg-primary px-4 font-medium text-primary-foreground transition-colors duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary-hover motion-safe:[transition-property:transform,background-color] motion-safe:active:scale-[.97] disabled:opacity-60"
             >
               {loading ? 'Creating…' : 'Create account'}
             </button>
@@ -148,7 +148,7 @@ export default function SignUpPage() {
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Already have access?{' '}
-            <Link href="/auth/login" className="font-medium text-primary hover:underline">
+            <Link href="/auth/login" className="font-medium text-primary [@media(hover:hover)_and_(pointer:fine)]:hover:underline">
               Sign in
             </Link>
           </p>

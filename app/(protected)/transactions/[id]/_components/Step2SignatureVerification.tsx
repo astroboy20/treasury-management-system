@@ -150,13 +150,27 @@ function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
 
 // ─── Entry animation styles ───────────────────────────────────────────────────
 
+/*
+ * Opacity fade runs unconditionally — negligible vestibular impact.
+ * The translateY transform is only added when the user has NOT requested
+ * reduced motion, per Req 32.9.
+ */
 const PANEL_ANIMATION_STYLE = `
-  @keyframes fadeInPanel {
+  @keyframes sigFadeIn {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .sig-panel { animation: none !important; }
+  @keyframes sigFadeInFull {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .sig-panel {
+    animation: sigFadeIn 200ms ease-out both;
+  }
+  @media (not (prefers-reduced-motion: reduce)) {
+    .sig-panel {
+      animation: sigFadeInFull 200ms ease-out both;
+    }
   }
 `
 
@@ -239,7 +253,6 @@ export default function Step2SignatureVerification({
     return (
       <div
         className="sig-panel space-y-4"
-        style={{ animation: 'fadeInPanel 200ms ease-out both' }}
       >
         <style>{PANEL_ANIMATION_STYLE}</style>
 
@@ -305,7 +318,6 @@ export default function Step2SignatureVerification({
   return (
     <div
       className="sig-panel space-y-4"
-      style={{ animation: 'fadeInPanel 200ms ease-out both' }}
     >
       <style>{PANEL_ANIMATION_STYLE}</style>
 

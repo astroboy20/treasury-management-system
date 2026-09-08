@@ -8,16 +8,17 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        // Req 32.8: hover styles gated to pointer-capable devices to prevent touch flicker
+        default: "bg-primary text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:[a]:hover:bg-primary/80",
         secondary:
-          "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+          "bg-secondary text-secondary-foreground [@media(hover:hover)_and_(pointer:fine)]:[a]:hover:bg-secondary/80",
         destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
+          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [@media(hover:hover)_and_(pointer:fine)]:[a]:hover:bg-destructive/20",
         outline:
-          "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
+          "border-border text-foreground [@media(hover:hover)_and_(pointer:fine)]:[a]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:[a]:hover:text-muted-foreground",
         ghost:
-          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
-        link: "text-primary underline-offset-4 hover:underline",
+          "[@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:dark:hover:bg-muted/50",
+        link: "text-primary underline-offset-4 [@media(hover:hover)_and_(pointer:fine)]:hover:underline",
       },
     },
     defaultVariants: {

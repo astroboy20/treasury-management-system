@@ -409,6 +409,7 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
             transaction={workspace.transaction}
             approvals={workspace.approvals}
             documents={workspace.documents}
+            userRole={userRole}
           />
         </div>
       </div>

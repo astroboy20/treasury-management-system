@@ -155,7 +155,7 @@ export default function VoucherFiltersBar({
           <button
             onClick={clearAll}
             disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted hover:text-foreground active:scale-[.97] disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground motion-safe:active:scale-[.97] disabled:opacity-50"
           >
             <X className="size-3" />
             Clear filters

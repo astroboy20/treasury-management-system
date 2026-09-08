@@ -208,7 +208,7 @@ function EventRow({ event, isLast, delayMs, reducedMotion }: EventRowProps) {
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="text-[0.65rem] text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-sm"
+              className="text-[0.65rem] text-primary underline-offset-2 [@media(hover:hover)_and_(pointer:fine)]:hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-sm"
               aria-expanded={expanded}
               aria-controls={`audit-meta-${event.id}`}
             >

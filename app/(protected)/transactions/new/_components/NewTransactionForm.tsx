@@ -301,7 +301,7 @@ function OriginalTransactionCombobox({
           <button
             type="button"
             onClick={handleClear}
-            className="ml-2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus:outline-none"
+            className="ml-2 rounded-sm p-0.5 text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground focus:outline-none"
             aria-label="Clear selection"
           >
             <X className="size-3.5" />
@@ -347,7 +347,7 @@ function OriginalTransactionCombobox({
                   role="option"
                   aria-selected={opt.id === value}
                   onMouseDown={() => handleSelect(opt)}
-                  className="flex cursor-pointer items-start justify-between gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-muted"
+                  className="flex cursor-pointer items-start justify-between gap-3 px-3 py-2.5 text-sm transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted"
                 >
                   <div className="flex flex-col">
                     <span className="font-mono text-xs font-medium tabular-nums">
@@ -1088,14 +1088,14 @@ export default function NewTransactionForm({ customers }: Props) {
       <div className="flex items-center justify-end gap-3 pb-6">
         <a
           href="/transactions"
-          className="inline-flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted"
         >
           Cancel
         </a>
         <button
           type="submit"
           disabled={busy}
-          className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform duration-150 hover:bg-primary/90 active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary/90 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy && <Loader2 className="size-3.5 animate-spin" />}
           {busy ? 'Submitting…' : 'Submit instruction'}
