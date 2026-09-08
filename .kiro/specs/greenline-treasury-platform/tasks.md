@@ -676,7 +676,7 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Write a test that creates transactions using the `_e2e` user set, then calls `reset_e2e_transactions()`, then asserts all `_e2e` transactions and their child records are deleted and scenario user data is untouched.
     - _Requirements: 39.4, 39.6_
 
-  - [ ] 7.13 Final checkpoint — full end-to-end production readiness
+  - [x] 7.13 Final checkpoint — full end-to-end production readiness
     - Run the full E2E scenario: sign in as `treasury_maker_e2e`, create a Rollover P+I for Customer A, complete all 6 steps, pass all 5 approvals, execute as `operations_officer_e2e`, confirm as `treasury_maker_e2e`, view audit trail.
     - Verify `reset_e2e_transactions()` cleans up cleanly.
     - Ensure all tests pass, ask the user if questions arise.

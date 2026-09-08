@@ -764,12 +764,25 @@ AS $$
 DECLARE
   v_deleted_count INTEGER;
 BEGIN
-  -- Delete all transactions created by any _e2e profile.
-  -- Child rows (signature_verifications, customer_confirmations,
+  -- Step 1: Explicitly delete audit_events for e2e transactions.
+  -- audit_events.transaction_id has NO ON DELETE CASCADE (append-only table;
+  -- the FK is plain to prevent accidental cascades). Must be deleted before
+  -- the parent treasury_transactions rows to avoid a FK violation (23503).
+  DELETE FROM audit_events
+  WHERE transaction_id IN (
+    SELECT id
+    FROM treasury_transactions
+    WHERE created_by IN (
+      SELECT id FROM profiles WHERE email LIKE '%_e2e@greenline.test'
+    )
+  );
+
+  -- Step 2: Delete the parent transactions.
+  -- All other child rows (signature_verifications, customer_confirmations,
   -- investment_verifications, vouchers, rollover_details,
   -- pre_liquidation_details, approvals, operations_executions,
-  -- transaction_documents, payment_instructions, notifications,
-  -- audit_events) are removed via ON DELETE CASCADE.
+  -- transaction_documents, payment_instructions, notifications)
+  -- are removed via ON DELETE CASCADE.
   DELETE FROM treasury_transactions
   WHERE created_by IN (
     SELECT id

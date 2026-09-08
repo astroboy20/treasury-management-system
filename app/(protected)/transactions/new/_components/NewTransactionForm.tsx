@@ -563,7 +563,7 @@ export default function NewTransactionForm({ customers }: Props) {
               <CustomerCombobox
                 customers={customers}
                 value={selectedCustomerId}
-                onChange={(id) => setValue('customerId', id, { shouldValidate: true })}
+                onChange={(id) => setValue('customerId', id, { shouldValidate: id !== '' })}
                 error={errors.customerId?.message}
               />
             </div>
@@ -586,6 +586,7 @@ export default function NewTransactionForm({ customers }: Props) {
                 <select
                   id="investmentId"
                   {...register('investmentId')}
+                  onChange={(e) => setValue('investmentId', e.target.value || undefined, { shouldValidate: false })}
                   disabled={!selectedCustomerId || investments.length === 0}
                   className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
                 >

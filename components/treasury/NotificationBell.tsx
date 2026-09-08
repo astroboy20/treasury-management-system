@@ -173,7 +173,7 @@ export function NotificationBell({
 
       <DropdownMenuContent align="end" className="w-80 p-0" sideOffset={8}>
         {/* ── Header ── */}
-        <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center justify-between px-4 py-3 bg-white!">
           <h3 className="text-sm font-semibold">Notifications</h3>
           {unreadCount > 0 && (
             <button
@@ -188,7 +188,7 @@ export function NotificationBell({
         <DropdownMenuSeparator className="m-0" />
 
         {/* ── List ── */}
-        <div className="max-h-[400px] overflow-y-auto">
+        <div className="max-h-[400px] overflow-y-auto bg-white">
           {displayed.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
               <Bell className="size-8 text-muted-foreground/50" />

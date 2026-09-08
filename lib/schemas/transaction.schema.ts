@@ -86,9 +86,21 @@ export const CreateTransactionSchema = z
   .object({
     customerId: z
       .string({ error: 'Customer is required.' })
-      .uuid('Invalid customer ID.'),
+      .min(1, 'Customer is required.')
+      .regex(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        'Invalid customer ID.',
+      ),
 
-    investmentId: z.string().uuid('Invalid investment ID.').optional(),
+    // Empty string from the select default option is normalised to undefined (Zod v4)
+    investmentId: z
+      .string()
+      .optional()
+      .refine(
+        (v) => !v || v === '' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+        { message: 'Invalid investment ID.' },
+      )
+      .transform((v) => (!v || v === '') ? undefined : v),
 
     transactionType: TransactionTypeEnum,
 
@@ -228,4 +240,4 @@ export const CreateTransactionSchema = z
     }
   })
 
-export type CreateTransactionInput = z.infer<typeof CreateTransactionSchema>
+export type CreateTransactionInput = z.input<typeof CreateTransactionSchema>

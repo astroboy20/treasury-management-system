@@ -656,30 +656,33 @@ describe('E2E seed reset function — reset_e2e_transactions()', () => {
     })
 
     it('all 18 scenario customers (A–R) are present after reset', async () => {
-      // Customer IDs follow the aaaaaaaa-00NN-... prefix pattern
+      // Count scenario customers by their customer_number pattern (CUST-A-001 through CUST-R-018)
+      // Using customer_number is reliable regardless of UUID generation strategy.
       const { count } = await admin()
         .from('customers')
         .select('*', { count: 'exact', head: true })
-        .like('id', 'aaaaaaaa-%')
+        .like('customer_number', 'CUST-%-001')
 
       // 18 scenario customers (A–R)
-      expect(count).toBeGreaterThanOrEqual(18)
+      expect(count ?? 0).toBeGreaterThanOrEqual(18)
     })
 
     it('all 14 staff profiles are present after reset', async () => {
-      // Profile IDs: 11111111-000X (scenario) and 22222222-000X (e2e) — 14 total
+      // Count staff profiles by their email domain pattern.
+      // Profile UUIDs may be real auth UUIDs (not following a fixed prefix pattern)
+      // when the DB was seeded via the Supabase Auth API, so we use email instead.
       const { count: scenario } = await admin()
         .from('profiles')
         .select('*', { count: 'exact', head: true })
-        .like('id', '11111111-%')
+        .like('email', '%_01@greenline.test')
 
       const { count: e2e } = await admin()
         .from('profiles')
         .select('*', { count: 'exact', head: true })
-        .like('id', '22222222-%')
+        .like('email', '%_e2e@greenline.test')
 
-      expect(scenario).toBeGreaterThanOrEqual(7)
-      expect(e2e).toBeGreaterThanOrEqual(7)
+      expect(scenario ?? 0).toBeGreaterThanOrEqual(7)
+      expect(e2e ?? 0).toBeGreaterThanOrEqual(7)
     })
 
     it('user_roles assignments are intact after reset', async () => {

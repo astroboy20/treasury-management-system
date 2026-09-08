@@ -75,7 +75,7 @@ export default function TransactionFiltersBar({
       aria-label="Transaction filters"
       className={`transition-opacity duration-150 ${pending ? 'opacity-60' : 'opacity-100'}`}
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 w-fit">
         {/* Free-text search — reference or customer name */}
         <div className="relative xl:col-span-2">
           <Search

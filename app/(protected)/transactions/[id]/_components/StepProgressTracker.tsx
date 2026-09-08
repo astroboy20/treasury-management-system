@@ -144,22 +144,17 @@ export default function StepProgressTracker({
                 >
                   {/* Icon — wrapped in Tooltip when locked with a reason */}
                   {step.state === 'locked' && step.lockedReason ? (
-                    <Tooltip>
-                      <TooltipTrigger>
-                        {/* Focusable span for keyboard-accessible tooltip */}
-                        <button
-                          type="button"
-                          aria-label={`Step ${step.id} locked: ${step.lockedReason}`}
-                          className="cursor-default"
-                          tabIndex={0}
-                        >
-                          <StepIcon state={step.state} id={step.id} />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" sideOffset={6}>
-                        {step.lockedReason}
-                      </TooltipContent>
-                    </Tooltip>
+                  <Tooltip>
+  <TooltipTrigger
+    aria-label={`Step ${step.id} locked: ${step.lockedReason}`}
+    className="cursor-default"
+  >
+    <StepIcon state={step.state} id={step.id} />
+  </TooltipTrigger>
+  <TooltipContent side="bottom" sideOffset={6}>
+    {step.lockedReason}
+  </TooltipContent>
+</Tooltip>
                   ) : (
                     <StepIcon state={step.state} id={step.id} />
                   )}
