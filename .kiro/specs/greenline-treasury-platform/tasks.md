@@ -672,7 +672,7 @@ All code is TypeScript. The stack is Next.js 16 App Router + React 19 + Tailwind
     - Verify hover animations are gated with `@media (hover: hover) and (pointer: fine)`.
     - _Requirements: 32.4, 32.5, 32.6, 32.7, 32.8, 32.11_
 
-  - [ ] 7.12 E2E seed reset function verification
+  - [x] 7.12 E2E seed reset function verification
     - Write a test that creates transactions using the `_e2e` user set, then calls `reset_e2e_transactions()`, then asserts all `_e2e` transactions and their child records are deleted and scenario user data is untouched.
     - _Requirements: 39.4, 39.6_
 
