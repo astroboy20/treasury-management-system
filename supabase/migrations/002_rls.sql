@@ -111,11 +111,13 @@ ALTER TABLE sla_config                ENABLE ROW LEVEL SECURITY;
 -- TABLE: profiles
 -- ============================================================
 -- Own row SELECT + ADMIN reads all
+DROP POLICY IF EXISTS "profiles_select_own" ON profiles;
 CREATE POLICY "profiles_select_own" ON profiles
   FOR SELECT
   USING (id = auth.uid() OR get_user_role() = 'ADMIN');
 
 -- Own row UPDATE only
+DROP POLICY IF EXISTS "profiles_update_own" ON profiles;
 CREATE POLICY "profiles_update_own" ON profiles
   FOR UPDATE
   USING (id = auth.uid())
@@ -128,19 +130,23 @@ CREATE POLICY "profiles_update_own" ON profiles
 -- TABLE: roles
 -- ============================================================
 -- Any authenticated user may read roles (needed for UI role labels)
+DROP POLICY IF EXISTS "roles_select_authenticated" ON roles;
 CREATE POLICY "roles_select_authenticated" ON roles
   FOR SELECT
   USING (auth.uid() IS NOT NULL);
 
 -- Only ADMIN may modify roles
+DROP POLICY IF EXISTS "roles_insert_admin" ON roles;
 CREATE POLICY "roles_insert_admin" ON roles
   FOR INSERT
   WITH CHECK (get_user_role() = 'ADMIN');
 
+DROP POLICY IF EXISTS "roles_update_admin" ON roles;
 CREATE POLICY "roles_update_admin" ON roles
   FOR UPDATE
   USING (get_user_role() = 'ADMIN');
 
+DROP POLICY IF EXISTS "roles_delete_admin" ON roles;
 CREATE POLICY "roles_delete_admin" ON roles
   FOR DELETE
   USING (get_user_role() = 'ADMIN');
@@ -149,15 +155,18 @@ CREATE POLICY "roles_delete_admin" ON roles
 -- TABLE: user_roles
 -- ============================================================
 -- Users see their own role assignments; ADMIN sees all
+DROP POLICY IF EXISTS "user_roles_select" ON user_roles;
 CREATE POLICY "user_roles_select" ON user_roles
   FOR SELECT
   USING (user_id = auth.uid() OR get_user_role() = 'ADMIN');
 
 -- Only ADMIN may assign or revoke roles
+DROP POLICY IF EXISTS "user_roles_insert_admin" ON user_roles;
 CREATE POLICY "user_roles_insert_admin" ON user_roles
   FOR INSERT
   WITH CHECK (get_user_role() = 'ADMIN');
 
+DROP POLICY IF EXISTS "user_roles_delete_admin" ON user_roles;
 CREATE POLICY "user_roles_delete_admin" ON user_roles
   FOR DELETE
   USING (get_user_role() = 'ADMIN');
@@ -166,20 +175,24 @@ CREATE POLICY "user_roles_delete_admin" ON user_roles
 -- TABLE: customers
 -- ============================================================
 -- All staff roles can read customers
+DROP POLICY IF EXISTS "customers_select_staff" ON customers;
 CREATE POLICY "customers_select_staff" ON customers
   FOR SELECT
   USING (is_staff_role());
 
 -- Treasury Officer and ADMIN can create/update customer records
+DROP POLICY IF EXISTS "customers_insert_treasury_admin" ON customers;
 CREATE POLICY "customers_insert_treasury_admin" ON customers
   FOR INSERT
   WITH CHECK (get_user_role() IN ('TREASURY_OFFICER','ADMIN'));
 
+DROP POLICY IF EXISTS "customers_update_treasury_admin" ON customers;
 CREATE POLICY "customers_update_treasury_admin" ON customers
   FOR UPDATE
   USING (get_user_role() IN ('TREASURY_OFFICER','ADMIN'));
 
 -- Only ADMIN can delete customer records
+DROP POLICY IF EXISTS "customers_delete_admin" ON customers;
 CREATE POLICY "customers_delete_admin" ON customers
   FOR DELETE
   USING (get_user_role() = 'ADMIN');
@@ -187,18 +200,22 @@ CREATE POLICY "customers_delete_admin" ON customers
 -- ============================================================
 -- TABLE: customer_accounts
 -- ============================================================
+DROP POLICY IF EXISTS "customer_accounts_select_staff" ON customer_accounts;
 CREATE POLICY "customer_accounts_select_staff" ON customer_accounts
   FOR SELECT
   USING (is_staff_role());
 
+DROP POLICY IF EXISTS "customer_accounts_insert_treasury_ops_admin" ON customer_accounts;
 CREATE POLICY "customer_accounts_insert_treasury_ops_admin" ON customer_accounts
   FOR INSERT
   WITH CHECK (get_user_role() IN ('TREASURY_OFFICER','OPERATIONS','ADMIN'));
 
+DROP POLICY IF EXISTS "customer_accounts_update_treasury_ops_admin" ON customer_accounts;
 CREATE POLICY "customer_accounts_update_treasury_ops_admin" ON customer_accounts
   FOR UPDATE
   USING (get_user_role() IN ('TREASURY_OFFICER','OPERATIONS','ADMIN'));
 
+DROP POLICY IF EXISTS "customer_accounts_delete_admin" ON customer_accounts;
 CREATE POLICY "customer_accounts_delete_admin" ON customer_accounts
   FOR DELETE
   USING (get_user_role() = 'ADMIN');
@@ -206,18 +223,22 @@ CREATE POLICY "customer_accounts_delete_admin" ON customer_accounts
 -- ============================================================
 -- TABLE: investments
 -- ============================================================
+DROP POLICY IF EXISTS "investments_select_staff" ON investments;
 CREATE POLICY "investments_select_staff" ON investments
   FOR SELECT
   USING (is_staff_role());
 
+DROP POLICY IF EXISTS "investments_insert_treasury_ops_admin" ON investments;
 CREATE POLICY "investments_insert_treasury_ops_admin" ON investments
   FOR INSERT
   WITH CHECK (get_user_role() IN ('TREASURY_OFFICER','OPERATIONS','ADMIN'));
 
+DROP POLICY IF EXISTS "investments_update_treasury_ops_admin" ON investments;
 CREATE POLICY "investments_update_treasury_ops_admin" ON investments
   FOR UPDATE
   USING (get_user_role() IN ('TREASURY_OFFICER','OPERATIONS','ADMIN'));
 
+DROP POLICY IF EXISTS "investments_delete_admin" ON investments;
 CREATE POLICY "investments_delete_admin" ON investments
   FOR DELETE
   USING (get_user_role() = 'ADMIN');
@@ -229,6 +250,7 @@ CREATE POLICY "investments_delete_admin" ON investments
 -- INSERT/UPDATE/DELETE are locked out for direct client use;
 -- all mutations go through PostgreSQL RPC functions.
 -- ============================================================
+DROP POLICY IF EXISTS "tt_select_treasury_approvers_admin" ON treasury_transactions;
 CREATE POLICY "tt_select_treasury_approvers_admin" ON treasury_transactions
   FOR SELECT
   USING (
@@ -236,6 +258,7 @@ CREATE POLICY "tt_select_treasury_approvers_admin" ON treasury_transactions
   );
 
 -- Account Officers see transactions they have confirmed
+DROP POLICY IF EXISTS "tt_select_account_officer" ON treasury_transactions;
 CREATE POLICY "tt_select_account_officer" ON treasury_transactions
   FOR SELECT
   USING (
@@ -249,6 +272,7 @@ CREATE POLICY "tt_select_account_officer" ON treasury_transactions
 
 -- Account Officers also see transactions awaiting their confirmation
 -- (status = SIGNATURE_VERIFIED means the ball is in Account Officer's court)
+DROP POLICY IF EXISTS "tt_select_account_officer_pending" ON treasury_transactions;
 CREATE POLICY "tt_select_account_officer_pending" ON treasury_transactions
   FOR SELECT
   USING (
@@ -257,6 +281,7 @@ CREATE POLICY "tt_select_account_officer_pending" ON treasury_transactions
   );
 
 -- Operations sees MD-approved and execution-stage transactions
+DROP POLICY IF EXISTS "tt_select_operations" ON treasury_transactions;
 CREATE POLICY "tt_select_operations" ON treasury_transactions
   FOR SELECT
   USING (
@@ -274,6 +299,7 @@ CREATE POLICY "tt_select_operations" ON treasury_transactions
 -- ============================================================
 -- TABLE: payment_instructions
 -- ============================================================
+DROP POLICY IF EXISTS "payment_instructions_select" ON payment_instructions;
 CREATE POLICY "payment_instructions_select" ON payment_instructions
   FOR SELECT
   USING (
@@ -291,6 +317,7 @@ CREATE POLICY "payment_instructions_select" ON payment_instructions
 -- ============================================================
 -- TABLE: signature_verifications
 -- ============================================================
+DROP POLICY IF EXISTS "sig_verifications_select" ON signature_verifications;
 CREATE POLICY "sig_verifications_select" ON signature_verifications
   FOR SELECT
   USING (
@@ -308,6 +335,7 @@ CREATE POLICY "sig_verifications_select" ON signature_verifications
 -- ============================================================
 -- TABLE: customer_confirmations
 -- ============================================================
+DROP POLICY IF EXISTS "customer_confirmations_select" ON customer_confirmations;
 CREATE POLICY "customer_confirmations_select" ON customer_confirmations
   FOR SELECT
   USING (
@@ -325,6 +353,7 @@ CREATE POLICY "customer_confirmations_select" ON customer_confirmations
 -- ============================================================
 -- TABLE: investment_verifications
 -- ============================================================
+DROP POLICY IF EXISTS "investment_verifications_select" ON investment_verifications;
 CREATE POLICY "investment_verifications_select" ON investment_verifications
   FOR SELECT
   USING (
@@ -338,6 +367,7 @@ CREATE POLICY "investment_verifications_select" ON investment_verifications
 -- ============================================================
 -- TABLE: vouchers
 -- ============================================================
+DROP POLICY IF EXISTS "vouchers_select" ON vouchers;
 CREATE POLICY "vouchers_select" ON vouchers
   FOR SELECT
   USING (
@@ -353,6 +383,7 @@ CREATE POLICY "vouchers_select" ON vouchers
 -- ============================================================
 -- TABLE: rollover_details
 -- ============================================================
+DROP POLICY IF EXISTS "rollover_details_select" ON rollover_details;
 CREATE POLICY "rollover_details_select" ON rollover_details
   FOR SELECT
   USING (
@@ -364,6 +395,7 @@ CREATE POLICY "rollover_details_select" ON rollover_details
 -- ============================================================
 -- TABLE: pre_liquidation_details
 -- ============================================================
+DROP POLICY IF EXISTS "pre_liquidation_details_select" ON pre_liquidation_details;
 CREATE POLICY "pre_liquidation_details_select" ON pre_liquidation_details
   FOR SELECT
   USING (
@@ -376,6 +408,7 @@ CREATE POLICY "pre_liquidation_details_select" ON pre_liquidation_details
 -- TABLE: approvals
 -- ============================================================
 -- Any role that can view the transaction can read its approvals
+DROP POLICY IF EXISTS "approvals_select" ON approvals;
 CREATE POLICY "approvals_select" ON approvals
   FOR SELECT
   USING (can_view_transaction(transaction_id));
@@ -386,6 +419,7 @@ CREATE POLICY "approvals_select" ON approvals
 -- ============================================================
 -- TABLE: operations_executions
 -- ============================================================
+DROP POLICY IF EXISTS "ops_executions_select" ON operations_executions;
 CREATE POLICY "ops_executions_select" ON operations_executions
   FOR SELECT
   USING (
@@ -401,11 +435,13 @@ CREATE POLICY "ops_executions_select" ON operations_executions
 -- ============================================================
 
 -- AUDIT and ADMIN see all audit events
+DROP POLICY IF EXISTS "audit_events_select_admin_audit" ON audit_events;
 CREATE POLICY "audit_events_select_admin_audit" ON audit_events
   FOR SELECT
   USING (get_user_role() IN ('AUDIT','ADMIN'));
 
 -- Other staff roles can see audit events for their accessible transactions
+DROP POLICY IF EXISTS "audit_events_select_staff" ON audit_events;
 CREATE POLICY "audit_events_select_staff" ON audit_events
   FOR SELECT
   USING (
@@ -430,16 +466,22 @@ REVOKE DELETE ON audit_events FROM anon;
 -- TABLE: transaction_documents
 -- ============================================================
 -- Users can read documents only if they can view the transaction
+DROP POLICY IF EXISTS "transaction_documents_select" ON transaction_documents;
 CREATE POLICY "transaction_documents_select" ON transaction_documents
   FOR SELECT
   USING (can_view_transaction(transaction_id));
 
--- TREASURY_OFFICER and ACCOUNT_OFFICER can upload documents.
+-- TREASURY_OFFICER, ACCOUNT_OFFICER, and all other staff roles that can view
+-- the transaction may upload supporting documents (Req 27.6).
 -- ADMIN can upload to any transaction.
+DROP POLICY IF EXISTS "transaction_documents_insert" ON transaction_documents;
 CREATE POLICY "transaction_documents_insert" ON transaction_documents
   FOR INSERT
   WITH CHECK (
-    get_user_role() IN ('TREASURY_OFFICER','ACCOUNT_OFFICER','ADMIN')
+    get_user_role() IN (
+      'TREASURY_OFFICER','ACCOUNT_OFFICER',
+      'HEAD_TREASURY','MIS','AUDIT','MD','OPERATIONS','ADMIN'
+    )
     AND can_view_transaction(transaction_id)
   );
 
@@ -449,11 +491,13 @@ CREATE POLICY "transaction_documents_insert" ON transaction_documents
 -- TABLE: notifications
 -- ============================================================
 -- Users see only their own notifications
+DROP POLICY IF EXISTS "notifications_select_own" ON notifications;
 CREATE POLICY "notifications_select_own" ON notifications
   FOR SELECT
   USING (recipient_id = auth.uid());
 
 -- Mark-read: users can update their own notifications' is_read field
+DROP POLICY IF EXISTS "notifications_update_own" ON notifications;
 CREATE POLICY "notifications_update_own" ON notifications
   FOR UPDATE
   USING (recipient_id = auth.uid())
@@ -465,15 +509,18 @@ CREATE POLICY "notifications_update_own" ON notifications
 -- TABLE: sla_config
 -- ============================================================
 -- All staff can read SLA config (needed to display SLA indicators)
+DROP POLICY IF EXISTS "sla_config_select_staff" ON sla_config;
 CREATE POLICY "sla_config_select_staff" ON sla_config
   FOR SELECT
   USING (is_staff_role());
 
 -- Only ADMIN can update SLA config
+DROP POLICY IF EXISTS "sla_config_update_admin" ON sla_config;
 CREATE POLICY "sla_config_update_admin" ON sla_config
   FOR UPDATE
   USING (get_user_role() = 'ADMIN');
 
+DROP POLICY IF EXISTS "sla_config_insert_admin" ON sla_config;
 CREATE POLICY "sla_config_insert_admin" ON sla_config
   FOR INSERT
   WITH CHECK (get_user_role() = 'ADMIN');
@@ -486,6 +533,7 @@ CREATE POLICY "sla_config_insert_admin" ON sla_config
 -- ============================================================
 
 -- Allow read if user has an authorised relationship to the transaction
+DROP POLICY IF EXISTS "storage_documents_read" ON storage.objects;
 CREATE POLICY "storage_documents_read" ON storage.objects
   FOR SELECT
   USING (
@@ -498,6 +546,7 @@ CREATE POLICY "storage_documents_read" ON storage.objects
   );
 
 -- Allow upload for TREASURY_OFFICER, ACCOUNT_OFFICER, ADMIN
+DROP POLICY IF EXISTS "storage_documents_upload" ON storage.objects;
 CREATE POLICY "storage_documents_upload" ON storage.objects
   FOR INSERT
   WITH CHECK (

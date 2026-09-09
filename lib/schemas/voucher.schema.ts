@@ -310,13 +310,22 @@ export const RolloverSlipVoucherSchema = z.object({
   // Computed server-side; submitted for display confirmation
   rolloverAmount: positiveNumericString('Rollover amount'),
 
-  rolloverMaturityDate: isoDateString('Rollover maturity date'),
+  rolloverMaturityDate: z.string().optional().refine(
+    (val) => !val || val.trim() === '' || /^\d{4}-\d{2}-\d{2}$/.test(val),
+    'Rollover maturity date must be in YYYY-MM-DD format.',
+  ),
 
   // Optional: interest payout amount for PRINCIPAL_ONLY / INTEREST_ONLY rollovers
-  interestPayout: numericString('Interest payout').optional(),
+  interestPayout: z.string().optional().refine(
+    (val) => !val || val.trim() === '' || (/^\d+(\.\d+)?$/.test(val) && Number(val) >= 0),
+    'Interest payout must be a non-negative number.',
+  ).transform(v => (!v || v.trim() === '') ? undefined : v),
 
   // Optional: requested payout amount for PARTIAL_PRINCIPAL rollovers (Req 17.4)
-  requestedPayout: positiveNumericString('Requested payout').optional(),
+  requestedPayout: z.string().optional().refine(
+    (val) => !val || val.trim() === '' || (/^\d+(\.\d+)?$/.test(val) && Number(val) > 0),
+    'Requested payout must be a positive number.',
+  ).transform(v => (!v || v.trim() === '') ? undefined : v),
 
   remarks,
 })

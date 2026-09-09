@@ -1,4 +1,5 @@
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
+import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -6,6 +7,8 @@ interface Step1InstructionProps {
   transaction: TransactionWorkspace['transaction']
   customer:    TransactionWorkspace['customer']
   createdBy:   TransactionWorkspace['createdBy']
+  /** Whether the current user can upload documents */
+  canUpload?: boolean
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -52,9 +55,9 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function Step1Instruction({ transaction, customer, createdBy }: Step1InstructionProps) {
+export default function Step1Instruction({ transaction, customer, createdBy, canUpload }: Step1InstructionProps) {
   return (
-    <div>
+    <div className="space-y-6">
       <dl className="grid gap-4 sm:grid-cols-2">
         <Field label="Transaction Reference" value={
           <span className="font-mono font-semibold text-primary">
@@ -96,6 +99,23 @@ export default function Step1Instruction({ transaction, customer, createdBy }: S
           />
         )}
       </dl>
+
+      {/* Document upload — customer instruction / mandate (Req 27.1, 27.4) */}
+      {canUpload && (
+        <div className="rounded-lg border border-border bg-muted/20 p-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Attach Instruction Document
+          </p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Upload the customer&apos;s written instruction (letter, signed form, or email printout)
+            as supporting evidence for this transaction.
+          </p>
+          <DocumentUpload
+            transactionId={transaction.id}
+            defaultDocumentType="INSTRUCTION"
+          />
+        </div>
+      )}
     </div>
   )
 }

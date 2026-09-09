@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 import { verifySignatureAction } from '@/lib/actions/verification.actions'
 import {
   SignatureVerificationSchema,
@@ -309,6 +310,20 @@ export default function Step2SignatureVerification({
             </div>
           )}
         </dl>
+
+        {/* Mandate document upload — available to Treasury Officers even after verification (Req 27.1) */}
+        <div className="rounded-lg border border-border bg-muted/20 p-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Attach Mandate Document
+          </p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Upload the signed mandate card or authority document used for signature verification.
+          </p>
+          <DocumentUpload
+            transactionId={transactionId}
+            defaultDocumentType="MANDATE"
+          />
+        </div>
       </div>
     )
   }
@@ -391,6 +406,20 @@ export default function Step2SignatureVerification({
           </p>
         )}
       </form>
+
+      {/* Mandate document upload (Req 27.1) — available while form is active */}
+      <div className="rounded-lg border border-border bg-muted/20 p-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Attach Mandate Document
+        </p>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Upload the signed mandate card or authority document used for signature verification.
+        </p>
+        <DocumentUpload
+          transactionId={transactionId}
+          defaultDocumentType="MANDATE"
+        />
+      </div>
     </div>
   )
 }

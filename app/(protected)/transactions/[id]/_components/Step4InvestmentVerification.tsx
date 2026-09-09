@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 import { verifyInvestmentAction } from '@/lib/actions/verification.actions'
 import {
   InvestmentVerificationSchema,
@@ -252,11 +253,23 @@ export default function Step4InvestmentVerification({
 
   if (investmentVerification) {
     return (
-      <div
-        className="inv-panel"
-      >
+      <div className="inv-panel space-y-5">
         <style>{PANEL_ANIMATION_STYLE}</style>
         <SnapshotDisplay snapshot={investmentVerification} />
+
+        {/* Evidence upload — attach physical investment certificate or statement (Req 27.1) */}
+        <div className="rounded-lg border border-border bg-muted/20 p-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Attach Investment Evidence
+          </p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Upload the Eazybankz investment certificate or account statement used to verify the values above.
+          </p>
+          <DocumentUpload
+            transactionId={transactionId}
+            defaultDocumentType="EVIDENCE"
+          />
+        </div>
       </div>
     )
   }
@@ -419,6 +432,20 @@ export default function Step4InvestmentVerification({
           </p>
         )}
       </form>
+
+      {/* Evidence upload — available even before verification is submitted (Req 27.1) */}
+      <div className="rounded-lg border border-border bg-muted/20 p-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Attach Investment Evidence
+        </p>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Upload the Eazybankz investment certificate or account statement used to verify the values above.
+        </p>
+        <DocumentUpload
+          transactionId={transactionId}
+          defaultDocumentType="EVIDENCE"
+        />
+      </div>
     </div>
   )
 }

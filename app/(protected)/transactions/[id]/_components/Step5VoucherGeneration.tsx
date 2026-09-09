@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
@@ -28,6 +28,7 @@ import {
   type TransferSlipVoucherInput,
 } from '@/lib/schemas/voucher.schema'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
+import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 
 // ─── Prop types ───────────────────────────────────────────────────────────────
 
@@ -485,8 +486,19 @@ interface PaymentInstructionFormProps {
  * Reusable payment instruction sub-form block (Req 36).
  * Shown for all voucher types where money leaves the company.
  * For internal THIRD_PARTY_PAYMENT, shows only the account number field (Req 21.3).
+ *
+ * FIX: previously this sub-form never rendered inputs for
+ * `paymentInstruction.amount` or `paymentInstruction.transferCharge`, even
+ * though `FundsOutVoucherSchema.superRefine()` requires both for external
+ * THIRD_PARTY_PAYMENT submissions. That meant those two fields could never
+ * be captured by react-hook-form, so validation failed on every external
+ * submission no matter what the user entered. Both fields are now
+ * registered below — `transferCharge` is shown read-only since the server
+ * always recomputes the authoritative value.
  */
 function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayment }: PaymentInstructionFormProps) {
+  const errs = errors as Record<string, { message?: string } | undefined>
+
   if (isInternalPayment) {
     return (
       <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-4">
@@ -498,7 +510,7 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
           Internal transfer — Transfer Charge: ₦0.00 (no charge for intra-company transfers)
         </p>
         <div className="grid gap-4">
-          <FormField id="pi-internal-account-number" label="Internal Account Number" error={(errors as Record<string, { message?: string }>)['paymentInstruction.accountNumber']?.message}>
+          <FormField id="pi-internal-account-number" label="Internal Account Number" error={errs['paymentInstruction.accountNumber']?.message}>
             <Input
               id="pi-internal-account-number"
               placeholder="Internal account number"
@@ -519,7 +531,7 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
         <p className="text-xs font-semibold text-foreground">Payment Instruction</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField id="pi-beneficiary" label="Beneficiary Name" error={(errors as Record<string, { message?: string }>)['paymentInstruction.beneficiaryName']?.message}>
+        <FormField id="pi-beneficiary" label="Beneficiary Name" error={errs['paymentInstruction.beneficiaryName']?.message}>
           <Input
             id="pi-beneficiary"
             placeholder="Full beneficiary name"
@@ -528,7 +540,7 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
             className="text-sm"
           />
         </FormField>
-        <FormField id="pi-bank" label="Bank Name" error={(errors as Record<string, { message?: string }>)['paymentInstruction.bankName']?.message}>
+        <FormField id="pi-bank" label="Bank Name" error={errs['paymentInstruction.bankName']?.message}>
           <Input
             id="pi-bank"
             placeholder="e.g. First Bank of Nigeria"
@@ -537,7 +549,7 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
             className="text-sm"
           />
         </FormField>
-        <FormField id="pi-account-number" label="Account Number" error={(errors as Record<string, { message?: string }>)['paymentInstruction.accountNumber']?.message}>
+        <FormField id="pi-account-number" label="Account Number" error={errs['paymentInstruction.accountNumber']?.message}>
           <Input
             id="pi-account-number"
             placeholder="10-digit NUBAN"
@@ -547,7 +559,7 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
             className="text-sm"
           />
         </FormField>
-        <FormField id="pi-account-type" label="Account Type" error={(errors as Record<string, { message?: string }>)['paymentInstruction.accountType']?.message}>
+        <FormField id="pi-account-type" label="Account Type" error={errs['paymentInstruction.accountType']?.message}>
           <Input
             id="pi-account-type"
             placeholder="e.g. SAVINGS, CURRENT"
@@ -556,8 +568,40 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
             className="text-sm"
           />
         </FormField>
+        {/* FIX: was missing — required by superRefine() for external transfers */}
+        <FormField id="pi-amount" label="Transfer Amount" error={errs['paymentInstruction.amount']?.message}>
+          <Input
+            id="pi-amount"
+            type="text"
+            inputMode="decimal"
+            placeholder="e.g. 5000000.00"
+            disabled={disabled}
+            {...register('paymentInstruction.amount' as never)}
+            className="text-sm"
+          />
+        </FormField>
+        {/* FIX: was missing — required by superRefine() for external transfers.
+            Kept read-only/disabled since the server always recomputes the
+            authoritative 0.10% charge; still registered so it's present
+            in the submitted payload instead of being permanently undefined. */}
+        <FormField
+          id="pi-transfer-charge"
+          label="Transfer Charge (estimated)"
+          required={false}
+          hint="Server recalculates the authoritative 0.10% charge on submit"
+          error={errs['paymentInstruction.transferCharge']?.message}
+        >
+          <Input
+            id="pi-transfer-charge"
+            type="text"
+            inputMode="decimal"
+            disabled
+            {...register('paymentInstruction.transferCharge' as never)}
+            className="text-sm"
+          />
+        </FormField>
         <div className="sm:col-span-2">
-          <FormField id="pi-purpose" label="Transfer Purpose" required={false} error={(errors as Record<string, { message?: string }>)['paymentInstruction.purpose']?.message}>
+          <FormField id="pi-purpose" label="Transfer Purpose" required={false} error={errs['paymentInstruction.purpose']?.message}>
             <Input
               id="pi-purpose"
               placeholder="Purpose of transfer"
@@ -1009,7 +1053,7 @@ function FundsInForm({ disabled, register, errors }: VariantFormProps) {
   )
 }
 
-function FundsOutForm({ disabled, register, errors, snapshot, transactionType, scenarioCode, watch, isInternalPayment }: VariantFormProps) {
+function FundsOutForm({ disabled, register, errors, snapshot, transactionType, scenarioCode, watch, setValue, isInternalPayment }: VariantFormProps) {
   const errs = errors as Record<string, { message?: string } | undefined>
   const isPreLiquidation = transactionType === 'PRE_LIQUIDATION'
   const isThirdParty = transactionType === 'THIRD_PARTY_PAYMENT'
@@ -1042,6 +1086,29 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
     isThirdParty && isFinite(parsedNetAmount) && parsedNetAmount > 0
       ? Math.round(parsedNetAmount * 0.001 * 1e4) / 1e4
       : null
+
+  // FIX: keep paymentInstruction.amount / transferCharge in sync with the
+  // top-level netAmount for external third-party payments, so the user isn't
+  // asked to enter the same number twice and the two values can't silently
+  // diverge. Only auto-fills paymentInstruction.amount while the user hasn't
+  // typed a different value into that field directly.
+  useEffect(() => {
+    if (!isThirdParty || isInternalPayment) return
+    if (!setValue || !watch) return
+
+    const piAmount = (watch('paymentInstruction.amount' as never) as unknown) as string | undefined
+    if (!piAmount && watchedNetAmount) {
+      setValue('paymentInstruction.amount' as never, watchedNetAmount as never, { shouldValidate: false })
+    }
+    if (estimatedThirdPartyCharge !== null) {
+      setValue(
+        'paymentInstruction.transferCharge' as never,
+        String(estimatedThirdPartyCharge) as never,
+        { shouldValidate: false },
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedNetAmount, estimatedThirdPartyCharge, isThirdParty, isInternalPayment])
 
   return (
     <div className="space-y-4">
@@ -1147,7 +1214,6 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
             id="fo-principal"
             type="text"
             inputMode="decimal"
-            defaultValue={isThirdParty ? '' : snapshot.principal}
             disabled={disabled}
             {...register('principal' as never)}
             className="text-sm"
@@ -1200,7 +1266,7 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
         <FormField
           id="fo-net-amount"
           label={isThirdParty ? 'Net Amount / Transfer Amount (₦)' : 'Net Amount (₦)'}
-          hint={isThirdParty ? 'Enter the transfer amount; server computes the 0.10% charge separately' : 'Server will validate against snapshot'}
+          hint={isThirdParty ? 'Enter the transfer amount; the Payment Instruction amount below stays in sync automatically' : 'Server will validate against snapshot'}
           error={errs.netAmount?.message}
         >
           <Input id="fo-net-amount" type="text" inputMode="decimal" placeholder="Computed net amount" disabled={disabled} {...register('netAmount' as never)} className="text-sm" />
@@ -1256,10 +1322,10 @@ function RolloverSlipForm({ disabled, register, errors, snapshot, scenarioCode }
       )}
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField id="rs-principal" label="Principal Amount (₦)" hint={`Snapshot: ${formatCurrency(snapshot.principal)}`} error={errs.principalAmount?.message}>
-          <Input id="rs-principal" type="text" inputMode="decimal" defaultValue={snapshot.principal} disabled={disabled} {...register('principalAmount' as never)} className="text-sm" />
+          <Input id="rs-principal" type="text" inputMode="decimal" placeholder={snapshot.principal} disabled={disabled} {...register('principalAmount' as never)} className="text-sm" />
         </FormField>
         <FormField id="rs-interest-due" label="Interest Due (₦)" hint={`Snapshot: ${formatCurrency(snapshot.accrued_interest)}`} error={errs.interestDue?.message}>
-          <Input id="rs-interest-due" type="text" inputMode="decimal" defaultValue={snapshot.accrued_interest} disabled={disabled} {...register('interestDue' as never)} className="text-sm" />
+          <Input id="rs-interest-due" type="text" inputMode="decimal" placeholder={snapshot.accrued_interest} disabled={disabled} {...register('interestDue' as never)} className="text-sm" />
         </FormField>
         {isPartialPrincipal && (
           <FormField
@@ -1482,7 +1548,15 @@ function buildDefaults(
 
     return {
       voucherType: 'FUNDS_OUT',
-      principal: snapshot?.principal ?? '',
+      // FIX: previously this always defaulted to snapshot.principal, even for
+      // THIRD_PARTY_PAYMENT — but the "Principal" field is relabelled "Transfer
+      // Amount" and left blank on purpose for that transaction type (the JSX
+      // used `defaultValue={isThirdParty ? '' : snapshot.principal}`). Because
+      // react-hook-form's `defaultValues` wins over a plain JSX `defaultValue`,
+      // the field was silently pre-filled with the old snapshot principal
+      // instead of being blank, and validation/submission used that stale
+      // value without the user ever touching the field.
+      principal: isThirdParty ? '' : (snapshot?.principal ?? ''),
       interest: snapshot?.accrued_interest ?? '',
       wht: '0',
       charge: isPreLiquidation ? preLiqCharge : '0',
@@ -1495,6 +1569,23 @@ function buildDefaults(
       // Zod .superRefine() can enforce all 6 PI fields for THIRD_PARTY_PAYMENT external
       transactionTypeHint: isThirdParty ? 'THIRD_PARTY_PAYMENT' : undefined,
       isInternal: isThirdParty ? (isInternalPayment ?? false) : undefined,
+      // FIX: paymentInstruction.transferCharge previously had no default and
+      // started as `undefined`/`''`, which fails the superRefine() check
+      // `pi.transferCharge === ''` even before the server recalculates it.
+      // Give it an explicit "0" starting value; the sync effect in
+      // FundsOutForm keeps it updated as netAmount changes.
+      paymentInstruction: isThirdParty
+        ? {
+            beneficiaryName: '',
+            bankName: '',
+            accountNumber: '',
+            accountType: '',
+            amount: '',
+            transferCharge: '0',
+            purpose: '',
+            isInternal: isInternalPayment ?? false,
+          }
+        : undefined,
     } satisfies Partial<FundsOutVoucherInput>
   }
 
@@ -1582,7 +1673,17 @@ export default function Step5VoucherGeneration({
   const resolvedVoucherType: VoucherType =
     TX_TYPE_TO_VOUCHER_TYPE[transactionType] ?? 'FUNDS_OUT'
 
-  const requiresPaymentInstruction = REQUIRES_PAYMENT_INSTRUCTION.has(transactionType)
+  const requiresPaymentInstruction = transactionType === 'THIRD_PARTY_PAYMENT'
+    || transactionType === 'MATURITY_TERMINATION'
+    || transactionType === 'ANNIVERSARY_PAYMENT'
+    || transactionType === 'PRE_LIQUIDATION'
+    || SAVINGS_FUNDS_OUT_TYPES.has(transactionType)
+    // ROLLOVER only needs a payment instruction for scenarios where money leaves the company
+    || (transactionType === 'ROLLOVER' && (
+      scenarioCode === 'PRINCIPAL_ONLY' ||
+      scenarioCode === 'PARTIAL_PRINCIPAL' ||
+      scenarioCode === 'INTEREST_ONLY'
+    ))
 
   const defaults = buildDefaults(resolvedVoucherType, investmentVerification, scenarioCode, transactionType, isInternalPayment)
 
@@ -1591,12 +1692,37 @@ export default function Step5VoucherGeneration({
     handleSubmit,
     watch,
     setValue,
+    reset,
     formState: { errors },
   } = useForm<VoucherPreparationInput>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(VoucherPreparationSchema) as any,
     defaultValues: defaults as VoucherPreparationInput,
   })
+
+  // Reset the form whenever the investment snapshot changes so that
+  // RHF's internal state reflects the pre-filled snapshot values.
+  // RHF ignores HTML defaultValue on registered inputs — only
+  // defaultValues / reset() populate the internal state correctly.
+  //
+  // FIX: previously this effect only depended on `investmentVerification?.id`,
+  // so switching transactionType / scenarioCode / isInternalPayment while the
+  // underlying investment stayed the same left the form holding defaults built
+  // for the *previous* mode. Those stale values were then validated against
+  // the *new* mode's Zod rules — which looked exactly like "a prefilled field
+  // trips validation" even though the user never touched it. The effect now
+  // re-syncs whenever any of the inputs to buildDefaults() change.
+  useEffect(() => {
+    reset(
+      buildDefaults(
+        resolvedVoucherType,
+        investmentVerification,
+        scenarioCode,
+        transactionType,
+        isInternalPayment,
+      ) as VoucherPreparationInput,
+    )
+  }, [investmentVerification?.id, resolvedVoucherType, scenarioCode, transactionType, isInternalPayment])
 
   async function onSubmit(data: VoucherPreparationInput) {
     setSubmitting(true)
@@ -1628,9 +1754,7 @@ export default function Step5VoucherGeneration({
 
   if (voucher) {
     return (
-      <div
-        className="voucher-panel"
-      >
+      <div className="voucher-panel space-y-5">
         <style>{PANEL_ANIMATION_STYLE}</style>
         <div className="flex items-center gap-2 mb-4">
           <CheckCircle2 className="size-4 text-emerald-600 shrink-0" aria-hidden />
@@ -1639,6 +1763,20 @@ export default function Step5VoucherGeneration({
           </p>
         </div>
         <FinalisedVoucherDisplay voucher={voucher} />
+
+        {/* Signed voucher / evidence upload — attach the physically signed voucher (Req 27.1) */}
+        <div className="rounded-lg border border-border bg-muted/20 p-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Attach Signed Voucher
+          </p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Upload the physically signed copy of this voucher or any additional supporting evidence.
+          </p>
+          <DocumentUpload
+            transactionId={transactionId}
+            defaultDocumentType="SIGNED_FORM"
+          />
+        </div>
       </div>
     )
   }

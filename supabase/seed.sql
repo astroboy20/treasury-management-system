@@ -37,6 +37,22 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
+  -- ── Scenario user: Treasury Checker (second Treasury Officer) ──────────
+  INSERT INTO auth.users (
+    id, email, encrypted_password, email_confirmed_at,
+    raw_user_meta_data, created_at, updated_at,
+    aud, role
+  )
+  VALUES (
+    '11111111-0001-0000-0000-000000000008',
+    'treasury_checker_01@greenline.test',
+    v_password_hash,
+    NOW(),
+    jsonb_build_object('full_name', 'Treasury Checker 01', 'requested_role', 'TREASURY_OFFICER'),
+    NOW(), NOW(), 'authenticated', 'authenticated'
+  )
+  ON CONFLICT (id) DO NOTHING;
+
   -- ── Scenario user: Account Officer ──────────────────────────
   INSERT INTO auth.users (
     id, email, encrypted_password, email_confirmed_at,
@@ -259,6 +275,7 @@ INSERT INTO profiles (id, full_name, email, is_active)
 VALUES
   -- Scenario users
   ('11111111-0001-0000-0000-000000000001', 'Treasury Maker 01',    'treasury_maker_01@greenline.test',       true),
+  ('11111111-0001-0000-0000-000000000008', 'Treasury Checker 01',  'treasury_checker_01@greenline.test',     true),
   ('11111111-0002-0000-0000-000000000002', 'Account Officer 01',   'account_officer_01@greenline.test',      true),
   ('11111111-0003-0000-0000-000000000003', 'Head Treasury 01',     'head_treasury_01@greenline.test',        true),
   ('11111111-0004-0000-0000-000000000004', 'MIS Officer 01',       'mis_officer_01@greenline.test',          true),
@@ -289,6 +306,7 @@ SELECT
 FROM (VALUES
   -- Scenario users
   ('11111111-0001-0000-0000-000000000001', 'TREASURY_OFFICER'),
+  ('11111111-0001-0000-0000-000000000008', 'TREASURY_OFFICER'),
   ('11111111-0002-0000-0000-000000000002', 'ACCOUNT_OFFICER'),
   ('11111111-0003-0000-0000-000000000003', 'HEAD_TREASURY'),
   ('11111111-0004-0000-0000-000000000004', 'MIS'),

@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Phone, PhoneOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -24,6 +24,8 @@ interface Step3CustomerConfirmationProps {
   transactionId: string
   /** Pre-filled officer name from authenticated profile */
   officerName: string
+  /** The customer's registered phone number for the Twilio call */
+  customerPhone?: string | null
   /** Whether the transaction type requires a beneficiary confirmation (e.g., third-party payment) */
   requiresBeneficiary: boolean
   /** Existing confirmation record — if present, panel is read-only */
@@ -122,26 +124,101 @@ const PANEL_ANIMATION_STYLE = `
   }
 `
 
+// ─── Call Customer Button ─────────────────────────────────────────────────────
+
+function CallCustomerButton({ phoneNumber }: { phoneNumber: string }) {
+  const [callState, setCallState] = useState<'idle' | 'loading' | 'active' | 'error'>('idle')
+  const [errorMsg, setErrorMsg] = useState('')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const deviceRef = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const connectionRef = useRef<any>(null)
+
+  const startCall = useCallback(async () => {
+    setCallState('loading')
+    setErrorMsg('')
+    try {
+      const res = await fetch('/api/twilio/token', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok || !json.token) {
+        if (res.status === 503) {
+          window.location.href = `tel:${phoneNumber}`
+          setCallState('idle')
+          return
+        }
+        throw new Error(json.error ?? 'Failed to get call token.')
+      }
+      const { Device } = await import('@twilio/voice-sdk')
+      const device = new Device(json.token, { logLevel: 1 })
+      deviceRef.current = device
+      device.on('error', (err: Error) => { setErrorMsg(err.message); setCallState('error') })
+      const call = await device.connect({ params: { To: phoneNumber } })
+      connectionRef.current = call
+      setCallState('active')
+      call.on('disconnect', () => {
+        setCallState('idle')
+        device.destroy()
+        deviceRef.current = null
+        connectionRef.current = null
+      })
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Call failed.')
+      setCallState('error')
+    }
+  }, [phoneNumber])
+
+  const endCall = useCallback(() => {
+    connectionRef.current?.disconnect()
+    deviceRef.current?.destroy()
+    setCallState('idle')
+  }, [])
+
+  if (callState === 'active') {
+    return (
+      <button type="button" onClick={endCall}
+        className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white [@media(hover:hover)_and_(pointer:fine)]:hover:bg-red-700">
+        <PhoneOff className="size-4" /> End Call
+      </button>
+    )
+  }
+
+  if (callState === 'loading') {
+    return (
+      <button type="button" disabled
+        className="inline-flex cursor-wait items-center gap-2 rounded-lg bg-primary/80 px-3 py-2 text-sm font-medium text-primary-foreground">
+        <Loader2 className="size-4 animate-spin" /> Connecting…
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button type="button" onClick={startCall}
+        className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary/90"
+        aria-label={`Call ${phoneNumber}`}>
+        <Phone className="size-4" />
+        Call Customer
+        <span className="ml-1 font-mono text-xs opacity-75">{phoneNumber}</span>
+      </button>
+      {callState === 'error' && (
+        <p className="text-xs text-destructive">{errorMsg}</p>
+      )}
+    </div>
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 /**
  * Step 3 — Customer Confirmation Panel.
- *
- * Allows an Account Officer to record the result of a telephone confirmation
- * call with the customer before investment verification proceeds.
- *
- * Behaviour:
- *   - Read-only when customerConfirmation is already recorded.
- *   - FAILED or UNREACHABLE status shows a destructive Alert explaining that
- *     Step 4 is locked as a result.
- *   - Visible and actionable only for ACCOUNT_OFFICER (canAct=true).
- *   - On submit: calls recordCustomerConfirmationAction, shows Sonner toast.
- *
+ * Allows an Account Officer to call the customer via Twilio Voice and record
+ * the confirmation result before investment verification proceeds.
  * Requirements: 9.1, 9.2, 9.3, 9.4, 9.5
  */
 export default function Step3CustomerConfirmation({
   transactionId,
   officerName,
+  customerPhone,
   requiresBeneficiary,
   customerConfirmation,
   canAct,
@@ -266,6 +343,17 @@ export default function Step3CustomerConfirmation({
       className="conf-panel space-y-5"
     >
       <style>{PANEL_ANIMATION_STYLE}</style>
+
+      {/* Call Customer button — shown when phone number is available */}
+      {customerPhone && canAct && (
+        <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+          <div className="flex-1">
+            <p className="text-xs font-medium text-muted-foreground">Customer Phone</p>
+            <p className="text-sm font-mono font-medium">{customerPhone}</p>
+          </div>
+          <CallCustomerButton phoneNumber={customerPhone} />
+        </div>
+      )}
 
       {/* Server-side error alert */}
       {serverError && (

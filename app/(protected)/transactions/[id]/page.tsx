@@ -219,6 +219,11 @@ function StepContent({
           transaction={workspace.transaction}
           customer={workspace.customer}
           createdBy={workspace.createdBy}
+          canUpload={
+            userRole !== null &&
+            userRole !== 'CUSTOMER' &&
+            userRole !== undefined
+          }
         />
       );
     case 2:
@@ -234,6 +239,7 @@ function StepContent({
         <Step3CustomerConfirmation
           transactionId={workspace.transaction.id}
           officerName={workspace.createdBy?.full_name ?? "Account Officer"}
+          customerPhone={workspace.customer?.registered_phone ?? null}
           requiresBeneficiary={requiresBeneficiary(
             workspace.transaction.transaction_type
           )}

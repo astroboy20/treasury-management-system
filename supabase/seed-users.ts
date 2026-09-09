@@ -45,6 +45,7 @@ const SEED_PASSWORD = 'Password123!'
 const USERS = [
   // ── Scenario users ──────────────────────────────────────────
   { email: 'treasury_maker_01@greenline.test',    full_name: 'Treasury Maker 01',     role: 'TREASURY_OFFICER' },
+  { email: 'treasury_checker_01@greenline.test',  full_name: 'Treasury Checker 01',   role: 'TREASURY_OFFICER' },
   { email: 'account_officer_01@greenline.test',   full_name: 'Account Officer 01',    role: 'ACCOUNT_OFFICER'  },
   { email: 'head_treasury_01@greenline.test',     full_name: 'Head Treasury 01',      role: 'HEAD_TREASURY'    },
   { email: 'mis_officer_01@greenline.test',       full_name: 'MIS Officer 01',        role: 'MIS'              },

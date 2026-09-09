@@ -5,13 +5,11 @@
  * The token allows the Twilio Voice SDK in the browser to place outbound calls
  * through the Twilio TwiML App.
  *
- * Environment variables required (add to .env.local):
- *   TWILIO_ACCOUNT_SID   — from Twilio Console → Account Info
- *   TWILIO_AUTH_TOKEN    — from Twilio Console → Account Info
- *   TWILIO_API_KEY_SID   — from Twilio Console → API Keys (create a "Standard" key)
- *   TWILIO_API_KEY_SECRET— matching secret for the API key above
- *   TWILIO_TWIML_APP_SID — from Twilio Console → Voice → TwiML Apps (create one whose
- *                          Voice Request URL points to POST /api/twilio/outbound-voice)
+ * Environment variables required (in .env):
+ *   TWILIO_ACCOUNT_SID    — from Twilio Console → Account Info
+ *   TWILIO_API_KEY_SID    — from Twilio Console → API Keys (create a "Standard" key)
+ *   TWILIO_API_KEY_SECRET — matching secret for the API key above
+ *   TWILIO_TWIML_APP_SID  — from Twilio Console → Voice → TwiML Apps
  *
  * Security:
  *   - Route is protected by Supabase session check.
@@ -23,14 +21,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as Twilio from 'twilio'
 import { createClient } from '@/lib/supabase/server'
 
-const {
-  TWILIO_ACCOUNT_SID,
-  TWILIO_API_KEY_SID,
-  TWILIO_API_KEY_SECRET,
-  TWILIO_TWIML_APP_SID,
-} = process.env
-
 export async function POST(_req: NextRequest) {
+  const {
+    TWILIO_ACCOUNT_SID,
+    TWILIO_API_KEY_SID,
+    TWILIO_API_KEY_SECRET,
+    TWILIO_TWIML_APP_SID,
+  } = process.env
+
   // ── Validate env ─────────────────────────────────────────────────────────
   if (
     !TWILIO_ACCOUNT_SID ||
@@ -47,10 +45,7 @@ export async function POST(_req: NextRequest) {
 
   // ── Require authenticated session ────────────────────────────────────────
   const supabase = await createClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
 
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
@@ -62,17 +57,14 @@ export async function POST(_req: NextRequest) {
 
   const voiceGrant = new VoiceGrant({
     outgoingApplicationSid: TWILIO_TWIML_APP_SID,
-    incomingAllow: false, // outbound-only for this use case
+    incomingAllow: false,
   })
 
   const token = new AccessToken(
     TWILIO_ACCOUNT_SID,
     TWILIO_API_KEY_SID,
     TWILIO_API_KEY_SECRET,
-    {
-      identity: user.id,
-      ttl: 3600, // 60-minute token
-    },
+    { identity: user.id, ttl: 3600 },
   )
   token.addGrant(voiceGrant)
 
