@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowUpRight,
   Check,
@@ -28,14 +29,17 @@ const features = [
 export default function Page() {
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6 lg:px-10">
+      <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-10">
         <Link href="/" className="flex items-center gap-3">
-          <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground">
-            <span className="font-mono text-sm font-bold">FMT</span>
-          </span>
-          <span className="font-semibold tracking-tight">
-            First Marina Trust<span className="text-primary">.</span>
-          </span>
+          <Image
+            src="/Logo_1.png"
+            alt="First Marina Trust"
+            width={120}
+            height={40}
+            className="object-contain"
+            priority
+          />
         </Link>
         <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
           <a
@@ -60,6 +64,7 @@ export default function Page() {
         >
           Sign in <ArrowUpRight className="size-4" />
         </Link>
+        </div>
       </header>
       <section className="mx-auto grid max-w-7xl gap-16 px-6 pb-24 pt-16 lg:grid-cols-[1.05fr_.95fr] lg:items-center lg:px-10 lg:pb-32 lg:pt-24">
         <div>

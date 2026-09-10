@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import {
@@ -102,10 +103,14 @@ export default function AppShell({ user, profile, role, initialNotifications, in
         {/* Logo */}
         <div className="flex items-center justify-between">
           <Link href="/dashboard" className="flex items-center gap-3 font-semibold">
-            <span className="grid size-9 place-items-center rounded-xl bg-primary font-mono text-sm text-primary-foreground">
-              FMT
-            </span>
-            First Marina Trust<span className="text-primary">.</span>
+            <Image
+              src="/Logo_1.png"
+              alt="First Marina Trust"
+              width={120}
+              height={40}
+              className="object-contain"
+              priority
+            />
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}

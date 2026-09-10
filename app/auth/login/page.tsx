@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { FormEvent, useState } from 'react'
 import { ArrowLeft, ArrowUpRight, LockKeyhole } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -49,10 +50,14 @@ export default function LoginPage() {
       {/* Left panel */}
       <section className="hidden bg-primary p-10 text-primary-foreground lg:flex lg:flex-col lg:justify-between">
         <Link href="/" className="flex items-center gap-3 font-semibold">
-          <span className="grid size-9 place-items-center rounded-xl border border-primary-foreground/30 font-mono text-sm">
-            FMT
-          </span>
-          First Marina Trust<span className="text-emerald-300">.</span>
+          <Image
+            src="/Logo_1.png"
+            alt="First Marina Trust"
+            width={120}
+            height={40}
+            className="object-contain"
+            priority
+          />
         </Link>
         <div>
           <p className="mb-5 text-sm text-primary-foreground/60">Treasury operations workspace</p>

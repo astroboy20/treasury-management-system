@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getTransactionWorkspaceAction } from "@/lib/actions/transaction.actions";
 import {
   getAuthenticatedUser,
@@ -296,10 +296,11 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
   const result = await getTransactionWorkspaceAction(id);
 
   if (!result.success) {
+    if (result.error === 'Not authenticated.') {
+      redirect('/auth/login')
+    }
     notFound();
   }
-  console.log(result, "result");
-
 
   const workspace = result.data;
 

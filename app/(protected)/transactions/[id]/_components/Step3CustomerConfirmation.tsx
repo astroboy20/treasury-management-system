@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
@@ -223,6 +224,7 @@ export default function Step3CustomerConfirmation({
   customerConfirmation,
   canAct,
 }: Step3CustomerConfirmationProps) {
+  const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
 
@@ -256,6 +258,7 @@ export default function Step3CustomerConfirmation({
 
     if (result.success) {
       toast.success('Customer confirmation recorded successfully.')
+      router.refresh()
     } else {
       const msg = result.error ?? 'Submission failed. Please try again.'
       setServerError(msg)
