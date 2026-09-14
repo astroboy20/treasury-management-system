@@ -1,89 +1,94 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { toast } from 'sonner'
-import { CheckCircle2, XCircle } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
-import { DocumentUpload } from '@/components/treasury/DocumentUpload'
-import { verifySignatureAction } from '@/lib/actions/verification.actions'
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { toast } from "sonner";
+import { CheckCircle2, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { DocumentUpload } from "@/components/treasury/DocumentUpload";
+import { verifySignatureAction } from "@/lib/actions/verification.actions";
 import {
   SignatureVerificationSchema,
   type SignatureVerificationInput,
   type CheckResult,
-} from '@/lib/schemas/verification.schema'
-import type { TransactionWorkspace } from '@/lib/services/transaction.service'
+} from "@/lib/schemas/verification.schema";
+import type { TransactionWorkspace } from "@/lib/services/transaction.service";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface Step2SignatureVerificationProps {
-  transactionId: string
+  transactionId: string;
   /** Existing verification record — if present, panel is read-only */
-  signatureVerification: TransactionWorkspace['signatureVerification']
+  signatureVerification: TransactionWorkspace["signatureVerification"];
   /** Whether the current user's role can act (TREASURY_OFFICER or ADMIN) */
-  canAct: boolean
+  canAct: boolean;
 }
 
 // ─── Checklist item config ────────────────────────────────────────────────────
 
 interface ChecklistItem {
-  field: keyof Omit<SignatureVerificationInput, 'notes'>
-  label: string
-  description: string
+  field: keyof Omit<SignatureVerificationInput, "notes">;
+  label: string;
+  description: string;
 }
 
 const CHECKLIST_ITEMS: ChecklistItem[] = [
   {
-    field: 'signatureResult',
-    label: 'Signature Match',
-    description: 'Customer signature matches the mandate card on file.',
+    field: "signatureResult",
+    label: "Signature Match",
+    description: "Customer signature matches the mandate card on file.",
   },
   {
-    field: 'mandateResult',
-    label: 'Mandate Check',
-    description: 'Mandate requirements are satisfied for this transaction type.',
+    field: "mandateResult",
+    label: "Mandate Check",
+    description:
+      "Mandate requirements are satisfied for this transaction type.",
   },
   {
-    field: 'accountOwnershipResult',
-    label: 'Account Ownership',
-    description: 'Beneficiary account ownership has been verified.',
+    field: "accountOwnershipResult",
+    label: "Account Ownership",
+    description: "Beneficiary account ownership has been verified.",
   },
   {
-    field: 'completenessResult',
-    label: 'Instruction Completeness',
-    description: 'All required fields in the instruction are present and valid.',
+    field: "completenessResult",
+    label: "Instruction Completeness",
+    description:
+      "All required fields in the instruction are present and valid.",
   },
-]
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString('en-NG', { dateStyle: 'long', timeStyle: 'short' })
+  return new Date(iso).toLocaleString("en-NG", {
+    dateStyle: "long",
+    timeStyle: "short",
+  });
 }
 
 function ResultBadge({ result }: { result: string }) {
-  const isPassed = result === 'PASSED'
+  const isPassed = result === "PASSED";
   return (
     <span
       className={[
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
         isPassed
-          ? 'bg-emerald-100 text-emerald-700'
-          : 'bg-red-100 text-red-700',
-      ].join(' ')}
+          ? "bg-emerald-100 text-emerald-700"
+          : "bg-red-100 text-red-700",
+      ].join(" ")}
     >
       {isPassed ? (
         <CheckCircle2 className="size-3" aria-hidden />
       ) : (
         <XCircle className="size-3" aria-hidden />
       )}
-      {isPassed ? 'Passed' : 'Failed'}
+      {isPassed ? "Passed" : "Failed"}
     </span>
-  )
+  );
 }
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -94,50 +99,54 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
         {value ?? <span className="italic text-muted-foreground">—</span>}
       </dd>
     </div>
-  )
+  );
 }
 
 // ─── Toggle row ───────────────────────────────────────────────────────────────
 
 interface ToggleRowProps {
-  item: ChecklistItem
-  value: CheckResult
-  onChange: (val: CheckResult) => void
-  disabled: boolean
+  item: ChecklistItem;
+  value: CheckResult;
+  onChange: (val: CheckResult) => void;
+  disabled: boolean;
 }
 
 function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
-  const isPassed = value === 'PASSED'
+  const isPassed = value === "PASSED";
 
   return (
     <div
       className={[
-        'flex items-center justify-between gap-3 rounded-lg border p-3 transition-colors',
+        "flex items-center justify-between gap-3 rounded-lg border p-3 transition-colors",
         isPassed
-          ? 'border-emerald-200 bg-emerald-50/50'
-          : 'border-border bg-background',
-      ].join(' ')}
+          ? "border-emerald-200 bg-emerald-50/50"
+          : "border-border bg-background",
+      ].join(" ")}
     >
-      <div className="min-w-0 flex-1">
+      <div
+        className="min-w-0 flex-1 cursor-pointer"
+        onClick={() => onChange(isPassed ? "FAILED" : "PASSED")}
+      >
         <p className="text-sm font-medium text-foreground">{item.label}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {item.description}
+        </p>
       </div>
       <button
         type="button"
         role="checkbox"
         aria-checked={isPassed}
-        aria-label={`${item.label}: ${isPassed ? 'Passed' : 'Failed'}`}
+        aria-label={`${item.label}: ${isPassed ? "Passed" : "Failed"}`}
         disabled={disabled}
-        onClick={() => onChange(isPassed ? 'FAILED' : 'PASSED')}
         className={[
-          'flex shrink-0 items-center justify-center rounded-full border-2 size-8 transition-colors',
+          "flex shrink-0 items-center justify-center rounded-full border-2 size-8 transition-colors",
           isPassed
-            ? 'border-emerald-500 bg-emerald-500 text-white'
-            : 'border-border bg-muted text-muted-foreground',
+            ? "border-emerald-500 bg-emerald-500 text-white"
+            : "border-border bg-muted text-muted-foreground",
           disabled
-            ? 'cursor-not-allowed opacity-60'
-            : 'cursor-pointer [@media(hover:hover)_and_(pointer:fine)]:hover:border-emerald-400',
-        ].join(' ')}
+            ? "cursor-not-allowed opacity-60"
+            : "cursor-pointer [@media(hover:hover)_and_(pointer:fine)]:hover:border-emerald-400",
+        ].join(" ")}
       >
         {isPassed ? (
           <CheckCircle2 className="size-4" aria-hidden />
@@ -146,7 +155,7 @@ function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
         )}
       </button>
     </div>
-  )
+  );
 }
 
 // ─── Entry animation styles ───────────────────────────────────────────────────
@@ -173,7 +182,7 @@ const PANEL_ANIMATION_STYLE = `
       animation: sigFadeInFull 200ms ease-out both;
     }
   }
-`
+`;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -195,8 +204,8 @@ export default function Step2SignatureVerification({
   signatureVerification,
   canAct,
 }: Step2SignatureVerificationProps) {
-  const [submitting, setSubmitting] = useState(false)
-  const [serverError, setServerError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const {
     handleSubmit,
@@ -207,28 +216,28 @@ export default function Step2SignatureVerification({
   } = useForm<SignatureVerificationInput>({
     resolver: zodResolver(SignatureVerificationSchema),
     defaultValues: {
-      signatureResult: 'FAILED',
-      mandateResult: 'FAILED',
-      accountOwnershipResult: 'FAILED',
-      completenessResult: 'FAILED',
+      signatureResult: "FAILED",
+      mandateResult: "FAILED",
+      accountOwnershipResult: "FAILED",
+      completenessResult: "FAILED",
     },
-  })
+  });
 
-  const watchedValues = watch()
+  const watchedValues = watch();
 
   async function onSubmit(data: SignatureVerificationInput) {
-    setSubmitting(true)
-    setServerError(null)
+    setSubmitting(true);
+    setServerError(null);
 
-    const result = await verifySignatureAction(transactionId, data)
-    setSubmitting(false)
+    const result = await verifySignatureAction(transactionId, data);
+    setSubmitting(false);
 
     if (result.success) {
-      toast.success('Signature verification submitted successfully.')
+      toast.success("Signature verification submitted successfully.");
     } else {
-      const msg = result.error ?? 'Submission failed. Please try again.'
-      setServerError(msg)
-      toast.error(msg)
+      const msg = result.error ?? "Submission failed. Please try again.";
+      setServerError(msg);
+      toast.error(msg);
     }
   }
 
@@ -243,18 +252,16 @@ export default function Step2SignatureVerification({
       notes,
       verified_at,
       verifier,
-    } = signatureVerification
+    } = signatureVerification;
 
     const anyFailed =
-      signature_result === 'FAILED' ||
-      mandate_result === 'FAILED' ||
-      account_ownership_result === 'FAILED' ||
-      completeness_result === 'FAILED'
+      signature_result === "FAILED" ||
+      mandate_result === "FAILED" ||
+      account_ownership_result === "FAILED" ||
+      completeness_result === "FAILED";
 
     return (
-      <div
-        className="sig-panel space-y-4"
-      >
+      <div className="sig-panel space-y-4">
         <style>{PANEL_ANIMATION_STYLE}</style>
 
         {/* Req 8.3 — downstream lock alert for any FAILED result */}
@@ -262,8 +269,8 @@ export default function Step2SignatureVerification({
           <Alert variant="destructive">
             <AlertTitle>Signature Verification Failed</AlertTitle>
             <AlertDescription>
-              One or more verification checks failed. Steps 3–6 are locked until this
-              transaction is reviewed.
+              One or more verification checks failed. Steps 3–6 are locked until
+              this transaction is reviewed.
             </AlertDescription>
           </Alert>
         )}
@@ -276,19 +283,25 @@ export default function Step2SignatureVerification({
             </p>
             <div className="grid gap-2 sm:grid-cols-2">
               {[
-                { label: 'Signature Match', result: signature_result },
-                { label: 'Mandate Check', result: mandate_result },
-                { label: 'Account Ownership', result: account_ownership_result },
-                { label: 'Instruction Completeness', result: completeness_result },
+                { label: "Signature Match", result: signature_result },
+                { label: "Mandate Check", result: mandate_result },
+                {
+                  label: "Account Ownership",
+                  result: account_ownership_result,
+                },
+                {
+                  label: "Instruction Completeness",
+                  result: completeness_result,
+                },
               ].map(({ label, result }) => (
                 <div
                   key={label}
                   className={[
-                    'flex items-center justify-between gap-3 rounded-lg border p-3',
-                    result === 'PASSED'
-                      ? 'border-emerald-200 bg-emerald-50/50'
-                      : 'border-border bg-muted/30',
-                  ].join(' ')}
+                    "flex items-center justify-between gap-3 rounded-lg border p-3",
+                    result === "PASSED"
+                      ? "border-emerald-200 bg-emerald-50/50"
+                      : "border-border bg-muted/30",
+                  ].join(" ")}
                 >
                   <span className="text-sm text-foreground">{label}</span>
                   <ResultBadge result={result} />
@@ -305,8 +318,12 @@ export default function Step2SignatureVerification({
 
           {notes && (
             <div className="sm:col-span-2">
-              <dt className="text-xs font-medium text-muted-foreground">Notes</dt>
-              <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">{notes}</dd>
+              <dt className="text-xs font-medium text-muted-foreground">
+                Notes
+              </dt>
+              <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">
+                {notes}
+              </dd>
             </div>
           )}
         </dl>
@@ -317,7 +334,8 @@ export default function Step2SignatureVerification({
             Attach Mandate Document
           </p>
           <p className="mb-3 text-xs text-muted-foreground">
-            Upload the signed mandate card or authority document used for signature verification.
+            Upload the signed mandate card or authority document used for
+            signature verification.
           </p>
           <DocumentUpload
             transactionId={transactionId}
@@ -325,15 +343,13 @@ export default function Step2SignatureVerification({
           />
         </div>
       </div>
-    )
+    );
   }
 
   // ── Form mode ───────────────────────────────────────────────────────────────
 
   return (
-    <div
-      className="sig-panel space-y-4"
-    >
+    <div className="sig-panel space-y-4">
       <style>{PANEL_ANIMATION_STYLE}</style>
 
       {/* Server-side error alert */}
@@ -354,8 +370,10 @@ export default function Step2SignatureVerification({
             <ToggleRow
               key={item.field}
               item={item}
-              value={watchedValues[item.field] ?? 'FAILED'}
-              onChange={(val) => setValue(item.field, val, { shouldValidate: true })}
+              value={watchedValues[item.field] ?? "FAILED"}
+              onChange={(val) =>
+                setValue(item.field, val, { shouldValidate: true })
+              }
               disabled={!canAct || submitting}
             />
           ))}
@@ -367,7 +385,7 @@ export default function Step2SignatureVerification({
             htmlFor="sig-notes"
             className="text-xs font-medium text-muted-foreground"
           >
-            Notes{' '}
+            Notes{" "}
             <span className="font-normal text-muted-foreground/70">
               (optional, max 1 000 chars)
             </span>
@@ -378,8 +396,8 @@ export default function Step2SignatureVerification({
             maxLength={1000}
             disabled={!canAct || submitting}
             placeholder="Add any notes about this verification…"
-            {...register('notes')}
-            aria-describedby={errors.notes ? 'sig-notes-error' : undefined}
+            {...register("notes")}
+            aria-describedby={errors.notes ? "sig-notes-error" : undefined}
             className="resize-none text-sm"
           />
           {errors.notes && (
@@ -397,7 +415,7 @@ export default function Step2SignatureVerification({
         {canAct ? (
           <div className="flex justify-end pt-1">
             <Button type="submit" disabled={submitting} size="sm">
-              {submitting ? 'Submitting…' : 'Submit Verification'}
+              {submitting ? "Submitting…" : "Submit Verification"}
             </Button>
           </div>
         ) : (
@@ -413,7 +431,8 @@ export default function Step2SignatureVerification({
           Attach Mandate Document
         </p>
         <p className="mb-3 text-xs text-muted-foreground">
-          Upload the signed mandate card or authority document used for signature verification.
+          Upload the signed mandate card or authority document used for
+          signature verification.
         </p>
         <DocumentUpload
           transactionId={transactionId}
@@ -421,5 +440,5 @@ export default function Step2SignatureVerification({
         />
       </div>
     </div>
-  )
+  );
 }
