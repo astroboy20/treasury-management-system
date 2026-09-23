@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { DocumentUpload } from '@/components/treasury/DocumentUpload'
+import type { UploadedDocument } from '@/components/treasury/DocumentUpload'
 import { verifyInvestmentAction } from '@/lib/actions/verification.actions'
 import {
   InvestmentVerificationSchema,
@@ -28,6 +29,8 @@ interface Step4InvestmentVerificationProps {
   investmentVerification: TransactionWorkspace['investmentVerification']
   /** Whether the current user's role can act — TREASURY_OFFICER only (Req 10.6) */
   canAct: boolean
+  /** Previously uploaded evidence document, if any */
+  existingDocument?: UploadedDocument | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -211,9 +214,11 @@ export default function Step4InvestmentVerification({
   eazybankzData,
   investmentVerification,
   canAct,
+  existingDocument,
 }: Step4InvestmentVerificationProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const [documentUploaded, setDocumentUploaded] = useState(!!existingDocument)
 
   const {
     register,
@@ -268,6 +273,7 @@ export default function Step4InvestmentVerification({
           <DocumentUpload
             transactionId={transactionId}
             defaultDocumentType="EVIDENCE"
+            existingDocument={existingDocument}
           />
         </div>
       </div>
@@ -421,8 +427,13 @@ export default function Step4InvestmentVerification({
 
         {/* Submit / permission notice */}
         {canAct ? (
-          <div className="flex justify-end pt-1">
-            <Button type="submit" disabled={submitting} size="sm">
+          <div className="flex flex-col gap-1.5 items-end pt-1">
+            {!documentUploaded && (
+              <p className="text-xs text-destructive" role="alert">
+                An evidence document must be uploaded before saving the snapshot.
+              </p>
+            )}
+            <Button type="submit" disabled={submitting || !documentUploaded} size="sm">
               {submitting ? 'Saving snapshot…' : 'Confirm & Save Snapshot'}
             </Button>
           </div>
@@ -436,7 +447,7 @@ export default function Step4InvestmentVerification({
       {/* Evidence upload — available even before verification is submitted (Req 27.1) */}
       <div className="rounded-lg border border-border bg-muted/20 p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Attach Investment Evidence
+          Attach Investment Evidence <span className="text-destructive">*</span>
         </p>
         <p className="mb-3 text-xs text-muted-foreground">
           Upload the Eazybankz investment certificate or account statement used to verify the values above.
@@ -444,6 +455,9 @@ export default function Step4InvestmentVerification({
         <DocumentUpload
           transactionId={transactionId}
           defaultDocumentType="EVIDENCE"
+          required
+          existingDocument={existingDocument}
+          onUploadSuccess={() => setDocumentUploaded(true)}
         />
       </div>
     </div>

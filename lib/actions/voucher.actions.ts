@@ -369,32 +369,104 @@ export async function prepareVoucherAction(
   delete voucherData.isInternal
   delete voucherData.transactionTypeHint
 
+  // ── Normalise camelCase → snake_case so the RPC can read all fields ──────
+  // The Zod schema uses camelCase (JS convention) but the RPC reads JSONB keys
+  // using snake_case (PostgreSQL convention). Map every camelCase field that the
+  // RPC INSERT reads by snake_case key.
+  if ('transferDate' in voucherData) {
+    voucherData.transfer_date = voucherData.transferDate
+    delete voucherData.transferDate
+  }
+  if ('netAmount' in voucherData) {
+    voucherData.net_amount = voucherData.netAmount
+    delete voucherData.netAmount
+  }
+  if ('availableBalance' in voucherData) {
+    voucherData.available_balance = voucherData.availableBalance
+    delete voucherData.availableBalance
+  }
+  if ('effectiveDate' in voucherData) {
+    voucherData.effective_date = voucherData.effectiveDate
+    delete voucherData.effectiveDate
+  }
+  if ('maturityDate' in voucherData) {
+    voucherData.maturity_date = voucherData.maturityDate
+    delete voucherData.maturityDate
+  }
+  if ('principalAmount' in voucherData) {
+    voucherData.principal = voucherData.principalAmount
+    delete voucherData.principalAmount
+  }
+  if ('interestDue' in voucherData) {
+    voucherData.interest = voucherData.interestDue
+    delete voucherData.interestDue
+  }
+  if ('newTenor' in voucherData) {
+    voucherData.new_tenor = voucherData.newTenor
+    delete voucherData.newTenor
+  }
+  if ('newRate' in voucherData) {
+    voucherData.new_rate = voucherData.newRate
+    delete voucherData.newRate
+  }
+  if ('rolloverAmount' in voucherData) {
+    voucherData.rollover_amount = voucherData.rolloverAmount
+    delete voucherData.rolloverAmount
+  }
+  if ('rolloverMaturityDate' in voucherData) {
+    voucherData.rollover_maturity_date = voucherData.rolloverMaturityDate
+    delete voucherData.rolloverMaturityDate
+  }
+  if ('interestPayout' in voucherData) {
+    voucherData.interest_payout = voucherData.interestPayout
+    delete voucherData.interestPayout
+  }
+  if ('requestedPayout' in voucherData) {
+    voucherData.requested_payout = voucherData.requestedPayout
+    delete voucherData.requestedPayout
+  }
+  if ('rolloverType' in voucherData) {
+    voucherData.rollover_type = voucherData.rolloverType
+    delete voucherData.rolloverType
+  }
+  if ('sourceAccountNumber' in voucherData) {
+    voucherData.source_account_number = voucherData.sourceAccountNumber
+    delete voucherData.sourceAccountNumber
+  }
+  if ('destinationAccountNumber' in voucherData) {
+    voucherData.destination_account_number = voucherData.destinationAccountNumber
+    delete voucherData.destinationAccountNumber
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Attach the calculation snapshot so the RPC can persist it in
   // vouchers.calculation_snapshot (Req 26.5)
   if (calculationSnapshot !== null) {
     voucherData.calculation_snapshot = calculationSnapshot
   }
 
-  // 8b. For INFLOW: map 'amount' → 'net_amount' so the RPC correctly populates
-  //     the voucher's net_amount column from the FUNDS_IN form data (Req 23.1).
-  if (txType === 'INFLOW' && parsed.data.voucherType === 'FUNDS_IN') {
+  // 8b. INFLOW and TRANSFER_SLIP use 'amount' (not 'netAmount') so they need
+  //     an explicit mapping to net_amount (not covered by the generic normalisation above).
+  if (txType === 'INFLOW' && voucherType === 'FUNDS_IN') {
     const inflowData = parsed.data as import('@/lib/schemas/voucher.schema').FundsInVoucherInput
     voucherData.net_amount = inflowData.amount
   }
+  if (voucherType === 'TRANSFER_SLIP') {
+    const transferData = parsed.data as import('@/lib/schemas/voucher.schema').TransferSlipVoucherInput
+    voucherData.net_amount = transferData.amount
+    // transfer_date already normalised by the generic mapping above via 'transferDate'
+  }
 
-  // 8b-savings. For SAVINGS/CALL/CMS Funds-Out: map 'availableBalance' → 'available_balance'
-  //     so the prepare_voucher RPC writes it to vouchers.available_balance (Req 38.1, 38.2).
-  //     net_amount is also set to the same value (no deductions for these types per SOP).
+  // 8b-savings. For SAVINGS/CALL/CMS Funds-Out: override with available_balance
+  //     and zero out principal/interest/wht/charge (Req 38.1, 38.2, 38.4).
   if (
     (txType === 'SAVINGS_FUNDS_OUT' || txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT') &&
-    parsed.data.voucherType === 'FUNDS_OUT'
+    voucherType === 'FUNDS_OUT'
   ) {
     const savingsData = parsed.data as import('@/lib/schemas/voucher.schema').FundsOutVoucherInput
     const availBal = savingsData.availableBalance ?? String(investmentSnapshot.available_amount)
     voucherData.available_balance = availBal
-    // net_amount mirrors available_balance for these types (Req 38.2 — no principal/interest split)
     voucherData.net_amount = availBal
-    // server-enforced: override principal/interest/wht/charge to zero (Req 38.4)
     voucherData.principal = '0'
     voucherData.interest = '0'
     voucherData.wht = '0'

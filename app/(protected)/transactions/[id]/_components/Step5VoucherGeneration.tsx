@@ -29,6 +29,7 @@ import {
 } from '@/lib/schemas/voucher.schema'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 import { DocumentUpload } from '@/components/treasury/DocumentUpload'
+import type { UploadedDocument } from '@/components/treasury/DocumentUpload'
 
 // ─── Prop types ───────────────────────────────────────────────────────────────
 
@@ -47,6 +48,8 @@ interface Step5VoucherGenerationProps {
    * Used to determine if this is an internal THIRD_PARTY_PAYMENT (Req 21.1, 21.3).
    */
   existingPaymentInstruction?: { is_internal?: boolean } | null
+  /** Previously uploaded signed-form document, if any */
+  existingDocument?: UploadedDocument | null
 }
 
 // ─── Types for voucher action (forward declaration to avoid circular import) ──
@@ -1662,9 +1665,11 @@ export default function Step5VoucherGeneration({
   voucher,
   canAct,
   existingPaymentInstruction,
+  existingDocument,
 }: Step5VoucherGenerationProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const [documentUploaded, setDocumentUploaded] = useState(!!existingDocument)
 
   // Derive isInternalPayment from the transaction's payment instruction (Req 21.1, 21.3)
   const isInternalPayment = existingPaymentInstruction?.is_internal ?? false
@@ -1775,6 +1780,7 @@ export default function Step5VoucherGeneration({
           <DocumentUpload
             transactionId={transactionId}
             defaultDocumentType="SIGNED_FORM"
+            existingDocument={existingDocument}
           />
         </div>
       </div>
@@ -1891,8 +1897,13 @@ export default function Step5VoucherGeneration({
 
         {/* Submit / permission notice */}
         {canAct ? (
-          <div className="flex justify-end pt-1">
-            <Button type="submit" disabled={submitting} size="sm">
+          <div className="flex flex-col gap-1.5 items-end pt-1">
+            {!documentUploaded && (
+              <p className="text-xs text-destructive" role="alert">
+                A signed document must be uploaded before preparing the voucher.
+              </p>
+            )}
+            <Button type="submit" disabled={submitting || !documentUploaded} size="sm">
               {submitting ? 'Preparing voucher…' : 'Prepare Voucher'}
             </Button>
           </div>
@@ -1902,6 +1913,23 @@ export default function Step5VoucherGeneration({
           </p>
         )}
       </form>
+
+      {/* Signed form upload — required before voucher can be prepared (Req 27.1) */}
+      <div className="rounded-lg border border-border bg-muted/20 p-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Attach Signed Form <span className="text-destructive">*</span>
+        </p>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Upload the physically signed instruction or mandate form before preparing the voucher.
+        </p>
+        <DocumentUpload
+          transactionId={transactionId}
+          defaultDocumentType="SIGNED_FORM"
+          required
+          existingDocument={existingDocument}
+          onUploadSuccess={() => setDocumentUploaded(true)}
+        />
+      </div>
     </div>
   )
 }

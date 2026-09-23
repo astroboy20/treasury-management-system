@@ -2,12 +2,12 @@
 
 import { useRef, useState, useTransition } from 'react'
 import { toast } from 'sonner'
-import { Upload, FileText, Loader2, AlertCircle, X } from 'lucide-react'
+import { Upload, FileText, Loader2, AlertCircle, X, CheckCircle2, ExternalLink } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { uploadDocumentAction } from '@/lib/actions/document.actions'
+import { uploadDocumentAction, getDocumentSignedUrlAction } from '@/lib/actions/document.actions'
 import {
   ALLOWED_MIME_TYPES,
   ALLOWED_FILE_TYPES_LABEL,
@@ -18,10 +18,33 @@ import {
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
+export interface UploadedDocument {
+  id: string
+  storage_path: string
+  uploaded_by: string
+  created_at: string
+}
+
 interface DocumentUploadProps {
   transactionId: string
   /** Pre-select a document type. Omit to let the user choose. */
   defaultDocumentType?: DocumentType
+  /**
+   * When true, a document must be uploaded before the enclosing form can
+   * proceed. Shows a required indicator and blocks the upload panel's internal
+   * submit (the parent form still controls its own submit gate).
+   */
+  required?: boolean
+  /**
+   * Previously uploaded document for this slot. When provided the component
+   * shows the file info and a link to view it instead of (or in addition to)
+   * the upload zone.
+   */
+  existingDocument?: UploadedDocument | null
+  /**
+   * Called after a successful upload so the parent can update its gate state.
+   */
+  onUploadSuccess?: (documentId: string) => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,6 +81,11 @@ function validateFile(file: File): string | null {
  * Validates file type and size client-side and surfaces a shadcn `Alert` for
  * invalid files (Req 27.2).
  *
+ * When `existingDocument` is provided the component shows the previously
+ * uploaded file and still allows a replacement upload.
+ * When `required` is true a required indicator is shown and `onUploadSuccess`
+ * is called after a successful upload so the parent form can gate its submit.
+ *
  * On successful upload: shows a Sonner toast with the file name.
  * On failure: shows a Sonner toast with the error message; the component
  * retains the selected file and document type so the user can retry (Req 27.5).
@@ -68,7 +96,13 @@ function validateFile(file: File): string | null {
  *
  * Requirements: 27.1, 27.2, 27.3, 27.4, 27.5
  */
-export function DocumentUpload({ transactionId, defaultDocumentType }: DocumentUploadProps) {
+export function DocumentUpload({
+  transactionId,
+  defaultDocumentType,
+  required = false,
+  existingDocument = null,
+  onUploadSuccess,
+}: DocumentUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [selectedFile, setSelectedFile]           = useState<File | null>(null)
@@ -77,6 +111,7 @@ export function DocumentUpload({ transactionId, defaultDocumentType }: DocumentU
   )
   const [validationError, setValidationError]     = useState<string | null>(null)
   const [isPending, startTransition]              = useTransition()
+  const [loadingUrl, setLoadingUrl]               = useState(false)
 
   // ── File selection ──────────────────────────────────────────────────────
 
@@ -129,6 +164,7 @@ export function DocumentUpload({ transactionId, defaultDocumentType }: DocumentU
         if (fileInputRef.current) {
           fileInputRef.current.value = ''
         }
+        onUploadSuccess?.(result.data!.documentId)
       } else {
         // Failure (Req 27.5): toast with error; retain file + type so the
         // user can retry without reselecting.
@@ -160,37 +196,105 @@ export function DocumentUpload({ transactionId, defaultDocumentType }: DocumentU
     validationError === null &&
     !isPending
 
+  // ── Helpers ─────────────────────────────────────────────────────────────
+
+  /** Derive the filename from a storage_path like "txId/TYPE/ts_name.pdf" */
+  function fileNameFromPath(path: string): string {
+    const parts = path.split('/')
+    const last = parts[parts.length - 1] ?? path
+    // Strip the timestamp prefix: "1234567890_filename.pdf" → "filename.pdf"
+    return last.replace(/^\d+_/, '')
+  }
+
+  async function handleViewDocument() {
+    if (!existingDocument) return
+    setLoadingUrl(true)
+    const result = await getDocumentSignedUrlAction(existingDocument.storage_path)
+    setLoadingUrl(false)
+    if (result.success && result.data?.signedUrl) {
+      window.open(result.data.signedUrl, '_blank', 'noopener,noreferrer')
+    } else {
+      toast.error('Could not generate a view link. Please try again.')
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-3">
 
-      {/* Document type selector */}
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="doc-type-select" className="text-xs font-medium text-muted-foreground">
-          Document Type
-        </Label>
-        <Select
-          value={documentType}
-          onValueChange={(v) => setDocumentType(v as DocumentType)}
-          disabled={isPending}
-        >
-          <SelectTrigger
-            id="doc-type-select"
-            className="h-8 text-xs"
-            aria-label="Select document type"
+      {/* Previously uploaded file — shown when existingDocument is provided */}
+      {existingDocument && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5">
+          <CheckCircle2 className="size-4 shrink-0 text-emerald-600" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+            {fileNameFromPath(existingDocument.storage_path)}
+          </span>
+          <span className="shrink-0 text-[0.65rem] text-muted-foreground">
+            {new Date(existingDocument.created_at).toLocaleDateString('en-NG')}
+          </span>
+          <button
+            type="button"
+            onClick={handleViewDocument}
+            disabled={loadingUrl}
+            className="ml-1 shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-700 ring-1 ring-emerald-300 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            aria-label="View uploaded document"
           >
-            <SelectValue placeholder="Select type…" />
-          </SelectTrigger>
-          <SelectContent>
-            {DOCUMENT_TYPES.map((type) => (
-              <SelectItem key={type} value={type} className="text-xs">
-                {DOCUMENT_TYPE_LABELS[type]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+            {loadingUrl ? (
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+            ) : (
+              <ExternalLink className="size-3" aria-hidden />
+            )}
+            View
+          </button>
+        </div>
+      )}
+
+      {/* Upload label — with required indicator when needed */}
+      {existingDocument ? (
+        <p className="text-xs font-medium text-muted-foreground">Replace document</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-medium text-muted-foreground">
+            Upload document
+            {required && <span className="ml-1 text-destructive" aria-hidden>*</span>}
+          </p>
+          {required && (
+            <p className="text-xs text-muted-foreground/70">
+              A document must be uploaded before you can submit this step.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Document type selector — hidden when type is pre-set by the parent */}
+      {!defaultDocumentType && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="doc-type-select" className="text-xs font-medium text-muted-foreground">
+            Document Type
+          </Label>
+          <Select
+            value={documentType}
+            onValueChange={(v) => setDocumentType(v as DocumentType)}
+            disabled={isPending}
+          >
+            <SelectTrigger
+              id="doc-type-select"
+              className="h-8 text-xs"
+              aria-label="Select document type"
+            >
+              <SelectValue placeholder="Select type…" />
+            </SelectTrigger>
+            <SelectContent>
+              {DOCUMENT_TYPES.map((type) => (
+                <SelectItem key={type} value={type} className="text-xs">
+                  {DOCUMENT_TYPE_LABELS[type]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* Inline validation alert (Req 27.2) */}
       {validationError && (

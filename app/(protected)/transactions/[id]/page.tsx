@@ -224,6 +224,9 @@ function StepContent({
             userRole !== 'CUSTOMER' &&
             userRole !== undefined
           }
+          existingDocument={
+            workspace.documents.find((d) => d.document_type === 'INSTRUCTION') ?? null
+          }
         />
       );
     case 2:
@@ -232,6 +235,9 @@ function StepContent({
           transactionId={workspace.transaction.id}
           signatureVerification={workspace.signatureVerification}
           canAct={userRole === "TREASURY_OFFICER" || userRole === "ADMIN"}
+          existingDocument={
+            workspace.documents.find((d) => d.document_type === 'MANDATE') ?? null
+          }
         />
       );
     case 3:
@@ -254,6 +260,9 @@ function StepContent({
           eazybankzData={eazybankzData}
           investmentVerification={workspace.investmentVerification}
           canAct={userRole === "TREASURY_OFFICER" || userRole === "ADMIN"}
+          existingDocument={
+            workspace.documents.find((d) => d.document_type === 'EVIDENCE') ?? null
+          }
         />
       );
     case 5:
@@ -266,6 +275,9 @@ function StepContent({
           voucher={workspace.voucher}
           canAct={userRole === "TREASURY_OFFICER" || userRole === "ADMIN"}
           existingPaymentInstruction={workspace.paymentInstruction}
+          existingDocument={
+            workspace.documents.find((d) => d.document_type === 'SIGNED_FORM') ?? null
+          }
         />
       );
     case 6:
@@ -295,6 +307,8 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
   // Load workspace data server-side
   const result = await getTransactionWorkspaceAction(id);
 
+  console.log(id,"is")
+
   if (!result.success) {
     if (result.error === 'Not authenticated.') {
       redirect('/auth/login')
@@ -308,6 +322,8 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
   const user = await getAuthenticatedUser();
   const userRole = user ? await resolveUserRole(user.id) : null;
   const userId = user?.id ?? null;
+
+  console.log(userId,"USER")
 
   // Fetch Eazybankz investment data server-side for Step 4 (Req 10.1, 30.4).
   // Uses the external_reference from the linked investment record, if present.

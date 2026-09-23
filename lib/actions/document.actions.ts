@@ -217,3 +217,42 @@ export async function uploadDocumentAction(
     },
   }
 }
+
+// ─── getDocumentSignedUrlAction ───────────────────────────────────────────────
+
+/**
+ * Generates a short-lived signed URL for an existing transaction document so
+ * the user can view it in a new tab.
+ *
+ * The caller supplies the `storage_path` (as stored in `transaction_documents`).
+ * A signed URL valid for SIGNED_URL_EXPIRY_SECONDS is returned.
+ *
+ * Requirements: 27.3
+ */
+export async function getDocumentSignedUrlAction(
+  storagePath: string,
+): Promise<ActionResult<{ signedUrl: string }>> {
+  if (!storagePath || typeof storagePath !== 'string') {
+    return { success: false, error: 'Storage path is required.' }
+  }
+
+  const user = await getAuthenticatedUser()
+  if (!user) {
+    return { success: false, error: 'Not authenticated.' }
+  }
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase.storage
+    .from('transaction-documents')
+    .createSignedUrl(storagePath, SIGNED_URL_EXPIRY_SECONDS)
+
+  if (error || !data?.signedUrl) {
+    return {
+      success: false,
+      error: `Could not generate view link: ${error?.message ?? 'Unknown error'}.`,
+    }
+  }
+
+  return { success: true, data: { signedUrl: data.signedUrl } }
+}

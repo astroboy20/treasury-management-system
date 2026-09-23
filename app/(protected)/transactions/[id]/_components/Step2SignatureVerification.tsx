@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { DocumentUpload } from "@/components/treasury/DocumentUpload";
+import type { UploadedDocument } from "@/components/treasury/DocumentUpload";
 import { verifySignatureAction } from "@/lib/actions/verification.actions";
 import {
   SignatureVerificationSchema,
@@ -26,6 +27,8 @@ interface Step2SignatureVerificationProps {
   signatureVerification: TransactionWorkspace["signatureVerification"];
   /** Whether the current user's role can act (TREASURY_OFFICER or ADMIN) */
   canAct: boolean;
+  /** Previously uploaded mandate document, if any */
+  existingDocument?: UploadedDocument | null;
 }
 
 // ─── Checklist item config ────────────────────────────────────────────────────
@@ -203,9 +206,11 @@ export default function Step2SignatureVerification({
   transactionId,
   signatureVerification,
   canAct,
+  existingDocument,
 }: Step2SignatureVerificationProps) {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [documentUploaded, setDocumentUploaded] = useState(!!existingDocument);
 
   const {
     handleSubmit,
@@ -340,6 +345,7 @@ export default function Step2SignatureVerification({
           <DocumentUpload
             transactionId={transactionId}
             defaultDocumentType="MANDATE"
+            existingDocument={existingDocument}
           />
         </div>
       </div>
@@ -413,8 +419,13 @@ export default function Step2SignatureVerification({
 
         {/* Submit / permission notice */}
         {canAct ? (
-          <div className="flex justify-end pt-1">
-            <Button type="submit" disabled={submitting} size="sm">
+          <div className="flex flex-col gap-1.5 items-end pt-1">
+            {!documentUploaded && (
+              <p className="text-xs text-destructive" role="alert">
+                A mandate document must be uploaded before submitting.
+              </p>
+            )}
+            <Button type="submit" disabled={submitting || !documentUploaded} size="sm">
               {submitting ? "Submitting…" : "Submit Verification"}
             </Button>
           </div>
@@ -428,7 +439,7 @@ export default function Step2SignatureVerification({
       {/* Mandate document upload (Req 27.1) — available while form is active */}
       <div className="rounded-lg border border-border bg-muted/20 p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Attach Mandate Document
+          Attach Mandate Document <span className="text-destructive">*</span>
         </p>
         <p className="mb-3 text-xs text-muted-foreground">
           Upload the signed mandate card or authority document used for
@@ -437,6 +448,9 @@ export default function Step2SignatureVerification({
         <DocumentUpload
           transactionId={transactionId}
           defaultDocumentType="MANDATE"
+          required
+          existingDocument={existingDocument}
+          onUploadSuccess={() => setDocumentUploaded(true)}
         />
       </div>
     </div>

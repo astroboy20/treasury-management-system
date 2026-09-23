@@ -1,5 +1,6 @@
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 import { DocumentUpload } from '@/components/treasury/DocumentUpload'
+import type { UploadedDocument } from '@/components/treasury/DocumentUpload'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -9,6 +10,8 @@ interface Step1InstructionProps {
   createdBy:   TransactionWorkspace['createdBy']
   /** Whether the current user can upload documents */
   canUpload?: boolean
+  /** Previously uploaded instruction document, if any */
+  existingDocument?: UploadedDocument | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -55,7 +58,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function Step1Instruction({ transaction, customer, createdBy, canUpload }: Step1InstructionProps) {
+export default function Step1Instruction({ transaction, customer, createdBy, canUpload, existingDocument }: Step1InstructionProps) {
   return (
     <div className="space-y-6">
       <dl className="grid gap-4 sm:grid-cols-2">
@@ -113,6 +116,7 @@ export default function Step1Instruction({ transaction, customer, createdBy, can
           <DocumentUpload
             transactionId={transaction.id}
             defaultDocumentType="INSTRUCTION"
+            existingDocument={existingDocument}
           />
         </div>
       )}
