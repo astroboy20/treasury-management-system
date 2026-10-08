@@ -239,7 +239,7 @@ export default async function AuditPage({ searchParams }: PageProps) {
                   <th className="px-5 py-3 font-medium">ID</th>
                   <th className="px-5 py-3 font-medium">Timestamp</th>
                   <th className="px-5 py-3 font-medium">Event Type</th>
-                  <th className="px-5 py-3 font-medium">Actor</th>
+                  {/* <th className="px-5 py-3 font-medium">Actor</th> */}
                   <th className="px-5 py-3 font-medium">Transaction Ref</th>
                   <th className="px-5 py-3 font-medium">From Status</th>
                   <th className="px-5 py-3 font-medium">To Status</th>
@@ -269,9 +269,9 @@ export default async function AuditPage({ searchParams }: PageProps) {
                     </td>
 
                     {/* Actor */}
-                    <td className="px-5 py-4 text-muted-foreground">
+                    {/* <td className="px-5 py-4 text-muted-foreground">
                       {event.actor_full_name ?? '—'}
-                    </td>
+                    </td> */}
 
                     {/* Transaction Ref */}
                     <td className="px-5 py-4">

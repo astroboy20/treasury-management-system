@@ -74,7 +74,7 @@ const ROLE_ACTION_STATUSES: Record<string, string[]> = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getOwnerRole(status: string): string {
-  return STATUS_TO_OWNER[status] ?? 'Unknown'
+  return STATUS_TO_OWNER[status] ?? 'COMPLETED'
 }
 
 function formatAmount(amount: number | null | undefined): string {

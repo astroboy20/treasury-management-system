@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   CheckCircle2,
@@ -520,12 +521,11 @@ export default function Step6ApprovalChain({
 }: Step6ApprovalChainProps) {
   // Build a fast lookup from stage → approval record
   const approvalMap = new Map(approvals.map((a) => [a.stage, a]))
-
   const isException = EXCEPTION_STATUSES.has(transactionStatus)
+  const router = useRouter()
 
   function handleActionComplete() {
-    // Trigger a full server component refresh so the workspace reflects the new status
-    window.location.reload()
+    router.refresh()
   }
 
   return (

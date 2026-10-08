@@ -61,20 +61,20 @@ export async function createTransactionAction(
   // 5. Call the PostgreSQL RPC (Req 7.3)
   const supabase = await createClient()
 
-  // Map payment instruction to snake_case keys expected by the RPC (Req 7.7, 21.1)
+  // Map payment instruction to snake_case keys expected by the RPC (Req 7.7, 21.1).
+  // Pass as a plain object — Supabase PostgREST serialises JS objects into JSONB
+  // correctly. JSON.stringify() would pass a text literal, breaking JSONB operators.
   const paymentInstructionRpc = parsed.data.paymentInstruction
-    ? JSON.stringify({
+    ? {
         beneficiary_name: parsed.data.paymentInstruction.beneficiaryName,
         bank_name: parsed.data.paymentInstruction.bankName,
         account_number: parsed.data.paymentInstruction.accountNumber,
         account_type: parsed.data.paymentInstruction.accountType,
         purpose: parsed.data.paymentInstruction.purpose ?? null,
-        // is_internal defaults to false for THIRD_PARTY_PAYMENT (Req 21.1)
         is_internal: parsed.data.paymentInstruction.isInternal === true,
-        // amount and transfer_charge will be set at voucher preparation stage (Req 21.2)
         amount: null,
         transfer_charge: null,
-      })
+      }
     : null
 
   const { data, error } = await supabase.rpc('create_treasury_transaction', {

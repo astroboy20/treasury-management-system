@@ -223,10 +223,14 @@ export async function prepareVoucherAction(
 
         type RolloverType = 'P_AND_I' | 'PRINCIPAL_ONLY' | 'PARTIAL_PRINCIPAL' | 'INTEREST_ONLY'
 
+        const rolloverInput =
+          parsed.data.voucherType === 'ROLLOVER_SLIP'
+            ? (parsed.data as import('@/lib/schemas/voucher.schema').RolloverSlipVoucherInput)
+            : null
+
         const requestedPayout =
-          parsed.data.voucherType === 'ROLLOVER_SLIP' && scenarioCode === 'PARTIAL_PRINCIPAL'
-            ? // The ROLLOVER_SLIP form carries the payout amount in requestedPayout for PARTIAL_PRINCIPAL (Req 17.4)
-              (parsed.data as import('@/lib/schemas/voucher.schema').RolloverSlipVoucherInput).requestedPayout
+          rolloverInput && scenarioCode === 'PARTIAL_PRINCIPAL'
+            ? rolloverInput.requestedPayout
             : undefined
 
         calculationSnapshot = await calculateRollover(
@@ -235,6 +239,27 @@ export async function prepareVoucherAction(
           String(investmentSnapshot.accrued_interest),
           requestedPayout,
         )
+
+        // Merge the form's display fields (new_rate, new_tenor, dates) into
+        // the snapshot inputs so RolloverSlipVoucher can read them for display.
+        // The RPC only returns rollover_type/principal/interest_due in inputs;
+        // the treasury-entered fields live only in the form and must be persisted
+        // here so the read-only voucher shows the complete record.
+        if (rolloverInput && calculationSnapshot) {
+          calculationSnapshot = {
+            ...calculationSnapshot,
+            inputs: {
+              ...calculationSnapshot.inputs,
+              new_rate: rolloverInput.newRate,
+              new_tenor: String(rolloverInput.newTenor),
+              effective_date: rolloverInput.effectiveDate,
+              rollover_maturity_date: rolloverInput.rolloverMaturityDate ?? '',
+              ...(rolloverInput.requestedPayout
+                ? { requested_payout: rolloverInput.requestedPayout }
+                : {}),
+            },
+          }
+        }
         break
       }
 
@@ -457,6 +482,22 @@ export async function prepareVoucherAction(
     // transfer_date already normalised by the generic mapping above via 'transferDate'
   }
 
+  // 8b-rollover. ROLLOVER_SLIP uses 'rolloverAmount' (not 'netAmount') as its primary
+  //     output field. Map it to net_amount so the vouchers table column is populated
+  //     and the display component can read it. The rollover_amount field is already
+  //     in voucherData under 'rollover_amount' from the normalisation above — just
+  //     also write it as 'net_amount'.
+  //     Additionally, populate principal and interest from the investment snapshot
+  //     directly on the server — this is the authoritative source and guarantees the
+  //     columns are never null even if the form submitted empty strings.
+  if (voucherType === 'ROLLOVER_SLIP') {
+    // net_amount = rolloverAmount (the reinvested amount)
+    voucherData.net_amount = voucherData.rollover_amount ?? String(investmentSnapshot.principal)
+    // principal and interest from the authoritative snapshot (not just what the form sent)
+    voucherData.principal = String(investmentSnapshot.principal)
+    voucherData.interest  = String(investmentSnapshot.accrued_interest)
+  }
+
   // 8b-savings. For SAVINGS/CALL/CMS Funds-Out: override with available_balance
   //     and zero out principal/interest/wht/charge (Req 38.1, 38.2, 38.4).
   if (
@@ -515,10 +556,14 @@ export async function prepareVoucherAction(
   }
 
   // 9. Call the PostgreSQL RPC (Req 11.7)
+  // Pass voucherData and paymentInstruction as plain objects — Supabase PostgREST
+  // serialises JS objects correctly into JSONB parameters. Passing JSON.stringify()
+  // results in the value arriving as a text literal, causing JSONB operators like ->
+  // to return null (which is why calculation_snapshot was always saved as {}).
   const { data, error } = await supabase.rpc('prepare_voucher', {
     p_transaction_id: transactionId,
-    p_voucher_data: JSON.stringify(voucherData),
-    p_payment_instruction: paymentInstruction ? JSON.stringify(paymentInstruction) : null,
+    p_voucher_data: voucherData,
+    p_payment_instruction: paymentInstruction ?? null,
   })
 
   if (error) {
@@ -616,12 +661,11 @@ export async function prepareVoucherAction(
         .single()
 
       if (parentTx) {
-        // Build payment instruction payload from the rollover form if present
+        // Build payment instruction payload from the rollover form if present.
+        // Pass as a plain object, not JSON.stringify — see note on RPC JSONB params.
         const rolloverData = parsed.data as import('@/lib/schemas/voucher.schema').RolloverSlipVoucherInput
         const paymentInstructionPayload =
-          (rolloverData as Record<string, unknown>).paymentInstruction
-            ? JSON.stringify((rolloverData as Record<string, unknown>).paymentInstruction)
-            : null
+          (rolloverData as Record<string, unknown>).paymentInstruction ?? null
 
         const scenarioLabel =
           scenarioCode === 'INTEREST_ONLY' ? 'Interest Only' : 'Principal Only'

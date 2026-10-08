@@ -1,3 +1,5 @@
+'use client'
+
 /**
  * VoucherDisplay — reusable read-only voucher rendering components.
  *
@@ -20,10 +22,11 @@
  *     translateY, ease-out, under 300 ms, prefers-reduced-motion respected).
  */
 
-import { Receipt, Banknote } from 'lucide-react'
-import { PaymentInstructionBlock, type PaymentInstructionData } from './PaymentInstructionBlock'
+import { Receipt, Banknote, Printer } from 'lucide-react'
+import { PaymentInstructionBlock } from './PaymentInstructionBlock'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Button } from '@/components/ui/button'
 import type { VoucherType } from '@/lib/schemas/voucher.schema'
 
 // ─── Voucher data shape (mirrors TransactionWorkspace['voucher']) ──────────────
@@ -72,7 +75,11 @@ function formatRate(val: string | null | undefined): string {
   if (!val) return '—'
   const num = parseFloat(val)
   if (isNaN(num)) return val
-  return `${num.toFixed(4)}%`
+  // Rates are stored as decimals (e.g. 0.125000 = 12.5%).
+  // If the value is < 1 it's a decimal — multiply by 100 to get the percentage.
+  // Values ≥ 1 are already in percentage form (legacy display).
+  const pct = num < 1 ? num * 100 : num
+  return `${pct.toFixed(4)}%`
 }
 
 function formatDatetime(iso: string): string {
@@ -371,13 +378,21 @@ export function RolloverSlipVoucher({ voucher }: { voucher: VoucherData }) {
   const effectiveDate = inputs?.effective_date
   const rolloverMaturityDate = inputs?.rollover_maturity_date ?? inputs?.new_maturity_date
   const rolloverAmount = outputs?.rollover_amount ?? voucher.net_amount
+
+  // principal / interest: prefer the voucher columns (populated by the server action),
+  // fall back to snapshot inputs when columns are null (legacy vouchers saved before the fix).
+  const principalDisplay =
+    voucher.principal ?? (inputs?.principal ? String(inputs.principal) : null)
+  const interestDisplay =
+    voucher.interest ?? (inputs?.interest_due ? String(inputs.interest_due) : null)
+
   const interestPaid = outputs?.interest_paid ?? outputs?.interest_payout
 
   return (
     <div className="space-y-4">
       <dl className="grid gap-3 sm:grid-cols-2">
-        <Field label="Principal Amount" value={formatCurrency(voucher.principal)} />
-        <Field label="Interest Due" value={formatCurrency(voucher.interest)} />
+        <Field label="Principal Amount" value={formatCurrency(principalDisplay)} />
+        <Field label="Interest Due" value={formatCurrency(interestDisplay)} />
         <Field
           label="Effective Date"
           value={effectiveDate ? String(effectiveDate) : '—'}
@@ -489,42 +504,61 @@ export function TransferSlipVoucher({ voucher }: { voucher: VoucherData }) {
 function VoucherHeader({
   voucher,
   transactionType,
+  onPrint,
 }: {
   voucher: VoucherData
   transactionType?: string
+  onPrint?: () => void
 }) {
   const isFinalised = voucher.status === 'FINALISED'
   const label =
     VOUCHER_TYPE_LABELS[voucher.voucher_type as VoucherType] ?? voucher.voucher_type
 
   return (
-    <div className="flex items-start gap-3">
-      <Receipt className="mt-0.5 size-5 shrink-0 text-emerald-600" aria-hidden />
-      <div className="flex-1 min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-foreground">{label}</p>
-          {transactionType && (
-            <span className="text-xs text-muted-foreground">
-              · {transactionType.replace(/_/g, ' ')}
-            </span>
-          )}
-          <Badge
-            variant={isFinalised ? 'default' : 'secondary'}
-            className={
-              isFinalised
-                ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400'
-                : ''
-            }
-          >
-            {isFinalised ? 'Finalised' : 'Draft'}
-          </Badge>
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start gap-3 min-w-0">
+        <Receipt className="mt-0.5 size-5 shrink-0 text-emerald-600" aria-hidden />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-foreground">{label}</p>
+            {transactionType && (
+              <span className="text-xs text-muted-foreground">
+                · {transactionType.replace(/_/g, ' ')}
+              </span>
+            )}
+            <Badge
+              variant={isFinalised ? 'default' : 'secondary'}
+              className={
+                isFinalised
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  : ''
+              }
+            >
+              {isFinalised ? 'Finalised' : 'Draft'}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Voucher #{voucher.voucher_number}
+            {' · '}
+            Generated {formatDatetime(voucher.created_at)}
+          </p>
         </div>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Voucher #{voucher.voucher_number}
-          {' · '}
-          Generated {formatDatetime(voucher.created_at)}
-        </p>
       </div>
+
+      {/* Print / download button — only shown for finalised vouchers */}
+      {isFinalised && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 gap-1.5 text-xs print:hidden print-hidden"
+          onClick={onPrint}
+          aria-label={`Print voucher ${voucher.voucher_number}`}
+        >
+          <Printer className="size-3.5" aria-hidden />
+          Print
+        </Button>
+      )}
     </div>
   )
 }
@@ -557,22 +591,119 @@ export interface VoucherDisplayProps {
  *
  * Entry animation: opacity 0 → 1 with subtle translateY, 220 ms ease-out.
  * Respects `prefers-reduced-motion` (Req 32.9).
+ *
+ * Print: clicking the Print button scopes a @media print rule so only the
+ * voucher content is visible — the rest of the page is hidden. This avoids
+ * needing a PDF library dependency.
  */
 export function VoucherDisplay({
   voucher,
   transactionType,
   hideHeader = false,
 }: VoucherDisplayProps) {
+  // Stable ID so the print CSS can target exactly this voucher instance
+  // (multiple vouchers might be on the same page in future).
+  const printId = `voucher-print-${voucher.voucher_number.replace(/[^a-z0-9]/gi, '-')}`
+
+  function handlePrint() {
+    const el = document.getElementById(printId)
+    if (!el) return
+
+    const win = window.open('', '_blank', 'width=820,height=750')
+    if (!win) return
+
+    // Build a clean HTML document with only the voucher content.
+    // Tailwind class names are stripped in the new window, so we inline
+    // minimal reset + layout CSS that matches the component's visual output.
+    win.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Voucher ${voucher.voucher_number}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      color: #111827;
+      padding: 40px;
+      background: #fff;
+    }
+
+    /* ── Header ── */
+    .voucher-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+    .voucher-title { font-size: 16px; font-weight: 600; }
+    .voucher-subtitle { font-size: 11px; color: #6b7280; margin-top: 3px; }
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 9999px;
+      font-size: 11px; font-weight: 500;
+      background: #d1fae5; color: #047857; border: 1px solid #a7f3d0;
+      margin-left: 6px;
+    }
+    hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
+
+    /* ── Field grid ── */
+    dl { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+    dt { font-size: 11px; font-weight: 500; color: #6b7280; margin-bottom: 2px; }
+    dd { font-size: 13px; color: #111827; }
+    .full-width { grid-column: span 2; }
+
+    /* ── Highlighted row (rollover amount / net amount) ── */
+    .amount-row {
+      grid-column: span 2;
+      display: flex; justify-content: space-between; align-items: center;
+      background: #f3f4f6; padding: 8px 12px; border-radius: 6px;
+      margin: 4px 0;
+    }
+    .amount-row-label { font-size: 11px; font-weight: 500; color: #6b7280; }
+    .amount-row-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    /* ── Payment instruction block ── */
+    .pi-block {
+      border: 1px solid #e5e7eb; border-radius: 6px;
+      padding: 12px; margin-top: 8px;
+    }
+    .pi-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #374151; margin-bottom: 8px; }
+
+    /* ── Hide interactive elements ── */
+    button, [role="button"] { display: none !important; }
+
+    /* ── Print media ── */
+    @media print {
+      body { padding: 20px; }
+      @page { margin: 15mm; }
+    }
+  </style>
+</head>
+<body>
+  ${el.innerHTML}
+</body>
+</html>`)
+
+    win.document.close()
+
+    // Remove any buttons that copied over (Print button, View button, etc.)
+    win.document.querySelectorAll('button, [role="button"], svg').forEach(n => n.remove())
+
+    // Wait for layout to settle, then print. Do NOT close the window —
+    // let the user close it after saving/printing.
+    win.onload = () => {
+      setTimeout(() => win.print(), 250)
+    }
+    // Fallback if onload already fired
+    if (win.document.readyState === 'complete') {
+      setTimeout(() => win.print(), 250)
+    }
+  }
+
   // Determine whether to use the Savings/Call/CMS layout (Req 38)
   const isSavingsLayout =
     transactionType != null && SAVINGS_TYPE_VOUCHERS.has(transactionType)
 
   return (
     <>
-      {/* Animation styles — scoped to this component.
-          Opacity fade runs unconditionally (negligible vestibular impact).
-          The translateY transform is gated on (not (prefers-reduced-motion: reduce))
-          so users who prefer reduced motion still see the fade but not the slide. */}
+      {/* Animation styles — scoped to this component */}
       <style>{`
         @keyframes voucherFadeInFull {
           from { opacity: 0; transform: translateY(6px); }
@@ -593,13 +724,18 @@ export function VoucherDisplay({
       `}</style>
 
       <div
+        id={printId}
         className="voucher-display-root space-y-4"
         role="region"
         aria-label={`Voucher ${voucher.voucher_number}`}
       >
         {!hideHeader && (
           <>
-            <VoucherHeader voucher={voucher} transactionType={transactionType} />
+            <VoucherHeader
+              voucher={voucher}
+              transactionType={transactionType}
+              onPrint={handlePrint}
+            />
             <Separator />
           </>
         )}

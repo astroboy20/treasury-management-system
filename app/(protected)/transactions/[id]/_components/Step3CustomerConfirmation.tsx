@@ -291,6 +291,8 @@ export default function Step3CustomerConfirmation({
 
     if (result.success) {
       toast.success("Customer confirmation recorded successfully.");
+      // Stay on the workspace page — Next.js revalidatePath in the server action
+      // will refresh the server component so the panel switches to read-only mode.
       router.replace("/dashboard");
     } else {
       const msg = result.error ?? "Submission failed. Please try again.";
@@ -314,7 +316,6 @@ export default function Step3CustomerConfirmation({
       confirmer,
       confirmed_by,
     } = customerConfirmation;
-    console.log(customerConfirmation, "customerConfirmation");
     const isException =
       confirmation_status === "FAILED" || confirmation_status === "UNREACHABLE";
 

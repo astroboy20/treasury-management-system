@@ -49,7 +49,8 @@ function formatCurrency(val: string): string {
 function formatRate(val: string): string {
   const num = parseFloat(val)
   if (isNaN(num)) return val
-  return `${num.toFixed(4)}%`
+  const pct = num < 1 ? num * 100 : num
+  return `${pct.toFixed(4)}%`
 }
 
 function formatDateTime(iso: string): string {

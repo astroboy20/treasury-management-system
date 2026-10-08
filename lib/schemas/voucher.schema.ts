@@ -163,8 +163,11 @@ export const FundsOutVoucherSchema = z
   .object({
     voucherType: z.literal('FUNDS_OUT'),
 
-    // principal is required for standard Funds-Out scenarios
-    principal: positiveNumericString('Principal'),
+    // principal is required for standard Funds-Out scenarios.
+    // For SAVINGS_FUNDS_OUT / CALL_FUNDS_OUT / CMS_FUNDS_OUT, principal is submitted
+    // as "0" because available_balance is the primary field (Req 38.2).
+    // numericString (≥ 0) is used here instead of positiveNumericString (> 0) to allow that.
+    principal: numericString('Principal'),
 
     // interest may be 0 for certain scenarios
     interest: numericString('Interest'),

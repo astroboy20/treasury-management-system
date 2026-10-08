@@ -30,6 +30,7 @@ import {
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 import type { UploadedDocument } from '@/components/treasury/DocumentUpload'
+import { VoucherDisplay } from '@/components/treasury/VoucherDisplay'
 
 // ─── Prop types ───────────────────────────────────────────────────────────────
 
@@ -79,7 +80,8 @@ function formatRate(val: string | null | undefined): string {
   if (!val) return '—'
   const num = parseFloat(val)
   if (isNaN(num)) return val
-  return `${num.toFixed(4)}%`
+  const pct = num < 1 ? num * 100 : num
+  return `${pct.toFixed(4)}%`
 }
 
 function formatDateTime(iso: string): string {
@@ -1595,15 +1597,26 @@ function buildDefaults(
   if (voucherType === 'ROLLOVER_SLIP') {
     // For PRINCIPAL_ONLY:    rolloverAmount = principal; interestPayout pre-filled from snapshot
     // For INTEREST_ONLY:     rolloverAmount = principal (stays invested); interestPayout pre-filled
-    // For PARTIAL_PRINCIPAL: rolloverAmount = remaining_principal (computed server-side)
+    // For PARTIAL_PRINCIPAL: rolloverAmount = remaining_principal (computed server-side after payout entry)
+    // For P_AND_I:           rolloverAmount = principal + accrued_interest
     const isPrincipalOnly = scenarioCode === 'PRINCIPAL_ONLY'
     const isPartialPrincipal = scenarioCode === 'PARTIAL_PRINCIPAL'
     const isInterestOnly = scenarioCode === 'INTEREST_ONLY'
+    const isPandI = !isPrincipalOnly && !isPartialPrincipal && !isInterestOnly
 
     let rolloverType: 'P_AND_I' | 'PRINCIPAL_ONLY' | 'PARTIAL_PRINCIPAL' | 'INTEREST_ONLY' = 'P_AND_I'
     if (isPrincipalOnly) rolloverType = 'PRINCIPAL_ONLY'
     else if (isPartialPrincipal) rolloverType = 'PARTIAL_PRINCIPAL'
     else if (isInterestOnly) rolloverType = 'INTEREST_ONLY'
+
+    // Pre-compute rolloverAmount for scenarios where we know it from the snapshot.
+    // This prevents Zod positiveNumericString failing on submit with an empty string.
+    const snapshotPrincipal = parseFloat(snapshot?.principal ?? '0')
+    const snapshotInterest = parseFloat(snapshot?.accrued_interest ?? '0')
+    const pandIRollover =
+      isPandI && isFinite(snapshotPrincipal) && isFinite(snapshotInterest)
+        ? (Math.round((snapshotPrincipal + snapshotInterest) * 1e4) / 1e4).toString()
+        : snapshot?.principal ?? ''
 
     return {
       voucherType: 'ROLLOVER_SLIP',
@@ -1612,10 +1625,17 @@ function buildDefaults(
       interestDue: snapshot?.accrued_interest ?? '',
       effectiveDate: snapshot?.effective_date ?? todayStr,
       newTenor: 90,
+      // newRate: stored as decimal (0.125000) — display shows 12.5000%; pass as-is for the
+      // RolloverSlipForm hint label and for persistence in the snapshot inputs.
       newRate: snapshot?.interest_rate ?? '',
-      // For PRINCIPAL_ONLY / INTEREST_ONLY: rolloverAmount = principal (interest is paid out separately)
-      // For PARTIAL_PRINCIPAL: rolloverAmount = remaining_principal (computed server-side after payout entry)
-      rolloverAmount: (isPrincipalOnly || isInterestOnly) ? (snapshot?.principal ?? '') : '',
+      // Pre-fill rolloverAmount for all known scenarios so positiveNumericString validation passes:
+      //   P_AND_I:        principal + interest_due
+      //   PRINCIPAL_ONLY: principal (interest paid out separately)
+      //   INTEREST_ONLY:  principal (stays invested)
+      //   PARTIAL_PRINCIPAL: '' (Treasury Officer enters payout; server derives remaining)
+      rolloverAmount: isPartialPrincipal
+        ? ''
+        : (isPandI ? pandIRollover : (snapshot?.principal ?? '')),
       rolloverMaturityDate: '',
       // Pre-fill interestPayout so the Treasury Officer can confirm it
       // Req 17.3 (PRINCIPAL_ONLY) / Req 17.5 (INTEREST_ONLY)
@@ -1761,13 +1781,7 @@ export default function Step5VoucherGeneration({
     return (
       <div className="voucher-panel space-y-5">
         <style>{PANEL_ANIMATION_STYLE}</style>
-        <div className="flex items-center gap-2 mb-4">
-          <CheckCircle2 className="size-4 text-emerald-600 shrink-0" aria-hidden />
-          <p className="text-xs font-medium text-emerald-700">
-            Voucher prepared and locked.
-          </p>
-        </div>
-        <FinalisedVoucherDisplay voucher={voucher} />
+        <VoucherDisplay voucher={voucher} transactionType={transactionType} />
 
         {/* Signed voucher / evidence upload — attach the physically signed voucher (Req 27.1) */}
         <div className="rounded-lg border border-border bg-muted/20 p-4">
