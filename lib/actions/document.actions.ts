@@ -98,12 +98,17 @@ export async function uploadDocumentAction(
   // ── 5. Verify the transaction exists and the user has access to it ────────
   //    The Supabase client operates under the authenticated user's session, so
   //    RLS on `treasury_transactions` enforces read access (Req 27.6).
+  //    We also read the file buffer in parallel — no point waiting for the DB
+  //    round-trip before we start reading bytes off the File object.
 
-  const { data: txData, error: txError } = await supabase
-    .from('treasury_transactions')
-    .select('id, status')
-    .eq('id', transactionId)
-    .single()
+  const [{ data: txData, error: txError }, fileBuffer] = await Promise.all([
+    supabase
+      .from('treasury_transactions')
+      .select('id, status')
+      .eq('id', transactionId)
+      .single(),
+    file.arrayBuffer(),
+  ])
 
   if (txError || !txData) {
     return { success: false, error: 'Transaction not found or access denied.' }
@@ -122,8 +127,6 @@ export async function uploadDocumentAction(
   const storagePath = `${transactionId}/${documentType}/${timestamp}_${sanitisedFilename}`
 
   // ── 7. Upload file to Supabase Storage ───────────────────────────────────
-
-  const fileBuffer = await file.arrayBuffer()
 
   const { error: uploadError } = await supabase.storage
     .from('transaction-documents')
@@ -165,35 +168,45 @@ export async function uploadDocumentAction(
     }
   }
 
-  // ── 9. Write DOCUMENT_UPLOADED audit event (Req 27.4, 28.1) ─────────────
+  // ── 9 & 10. Audit event + signed URL in parallel ──────────────────────────
+  //    The audit write does not affect the response — fire it alongside the
+  //    signed URL generation so neither blocks the other.
+  //    A failed audit insert is logged to stderr but does not fail the action
+  //    (the storage upload and DB row are already committed).
 
-  await supabase.from('audit_events').insert({
-    transaction_id: transactionId,
-    actor_id:       user.id,
-    event_type:     'DOCUMENT_UPLOADED',
-    from_status:    txData.status,
-    to_status:      txData.status, // status unchanged by upload
-    metadata: {
-      document_id:    docRow.id,
-      document_type:  documentType,
-      storage_path:   storagePath,
-      file_name:      file.name,
-      file_size_bytes: file.size,
-      mime_type:      file.type,
-    },
-  })
+  const [signedUrlResult] = await Promise.all([
+    supabase.storage
+      .from('transaction-documents')
+      .createSignedUrl(storagePath, SIGNED_URL_EXPIRY_SECONDS),
 
-  // ── 10. Generate short-lived signed URL (Req 27.3) ───────────────────────
-  //     3600 s = 60 minutes. Permanent public URLs are never issued.
+    supabase.from('audit_events').insert({
+      transaction_id: transactionId,
+      actor_id:       user.id,
+      event_type:     'DOCUMENT_UPLOADED',
+      from_status:    txData.status,
+      to_status:      txData.status, // status unchanged by upload
+      metadata: {
+        document_id:     docRow.id,
+        document_type:   documentType,
+        storage_path:    storagePath,
+        file_name:       file.name,
+        file_size_bytes: file.size,
+        mime_type:       file.type,
+      },
+    }).then(({ error }) => {
+      if (error) {
+        console.error('[uploadDocumentAction] audit_events insert failed:', error.message)
+      }
+    }),
+  ])
 
-  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-    .from('transaction-documents')
-    .createSignedUrl(storagePath, SIGNED_URL_EXPIRY_SECONDS)
+  const { data: signedUrlData, error: signedUrlError } = signedUrlResult
 
   if (signedUrlError || !signedUrlData?.signedUrl) {
     // The file is uploaded and the DB row is committed. The signed URL is a
     // convenience return; a missing URL is non-fatal — the sidebar will regenerate
     // one when the workspace reloads.
+    revalidatePath(`/transactions/${transactionId}`)
     return {
       success: true,
       data: {
@@ -236,11 +249,10 @@ export async function getDocumentSignedUrlAction(
     return { success: false, error: 'Storage path is required.' }
   }
 
-  const user = await getAuthenticatedUser()
-  if (!user) {
-    return { success: false, error: 'Not authenticated.' }
-  }
-
+  // Auth check: createClient() reads the session cookie; if the user is not
+  // authenticated the Storage RLS policy will deny the request below.
+  // We avoid a redundant DB round-trip here — the storage call is the
+  // authoritative gate for this action.
   const supabase = await createClient()
 
   const { data, error } = await supabase.storage

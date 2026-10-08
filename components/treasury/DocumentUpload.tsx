@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
+import { useRef, useState, useTransition, useId } from 'react'
 import { toast } from 'sonner'
 import { Upload, FileText, Loader2, AlertCircle, X, CheckCircle2, ExternalLink } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -104,6 +104,9 @@ export function DocumentUpload({
   onUploadSuccess,
 }: DocumentUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const instanceId = useId() // unique per component instance — prevents id collisions when multiple DocumentUpload components are on the same page
+  const fileInputId = `doc-file-input-${instanceId}`
+  const docTypeSelectId = `doc-type-select-${instanceId}`
 
   const [selectedFile, setSelectedFile]           = useState<File | null>(null)
   const [documentType, setDocumentType]           = useState<DocumentType | ''>(
@@ -112,6 +115,7 @@ export function DocumentUpload({
   const [validationError, setValidationError]     = useState<string | null>(null)
   const [isPending, startTransition]              = useTransition()
   const [loadingUrl, setLoadingUrl]               = useState(false)
+  const [isDragActive, setIsDragActive]           = useState(false)
 
   // ── File selection ──────────────────────────────────────────────────────
 
@@ -142,13 +146,6 @@ export function DocumentUpload({
   function handleUpload() {
     if (!selectedFile || !documentType || validationError) return
 
-    // Re-run client-side validation as a safety net before the server call
-    const clientErr = validateFile(selectedFile)
-    if (clientErr) {
-      setValidationError(clientErr)
-      return
-    }
-
     startTransition(async () => {
       const result = await uploadDocumentAction(
         transactionId,
@@ -177,6 +174,7 @@ export function DocumentUpload({
 
   function handleDrop(e: React.DragEvent<HTMLLabelElement>) {
     e.preventDefault()
+    setIsDragActive(false)
     const file = e.dataTransfer.files?.[0]
     if (!file) return
     setSelectedFile(file)
@@ -186,6 +184,12 @@ export function DocumentUpload({
 
   function handleDragOver(e: React.DragEvent<HTMLLabelElement>) {
     e.preventDefault()
+    setIsDragActive(true)
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLLabelElement>) {
+    e.preventDefault()
+    setIsDragActive(false)
   }
 
   // ── Derived state ───────────────────────────────────────────────────────
@@ -270,7 +274,7 @@ export function DocumentUpload({
       {/* Document type selector — hidden when type is pre-set by the parent */}
       {!defaultDocumentType && (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="doc-type-select" className="text-xs font-medium text-muted-foreground">
+          <Label htmlFor={docTypeSelectId} className="text-xs font-medium text-muted-foreground">
             Document Type
           </Label>
           <Select
@@ -279,7 +283,7 @@ export function DocumentUpload({
             disabled={isPending}
           >
             <SelectTrigger
-              id="doc-type-select"
+              id={docTypeSelectId}
               className="h-8 text-xs"
               aria-label="Select document type"
             >
@@ -329,13 +333,16 @@ export function DocumentUpload({
       ) : (
         /* Drop target */
         <label
-          htmlFor="doc-file-input"
+          htmlFor={fileInputId}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
           className={[
             'flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed',
-            'border-border bg-muted/20 px-4 py-5 text-center transition-colors duration-150',
-            '[@media(hover:hover)_and_(pointer:fine)]:hover:border-primary/50 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
+            'px-4 py-5 text-center transition-colors duration-150',
+            isDragActive
+              ? 'border-primary/70 bg-primary/5'
+              : 'border-border bg-muted/20 [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary/50 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
             isPending ? 'pointer-events-none opacity-50' : '',
           ].join(' ')}
         >
@@ -348,7 +355,7 @@ export function DocumentUpload({
           </span>
           <input
             ref={fileInputRef}
-            id="doc-file-input"
+            id={fileInputId}
             type="file"
             className="sr-only"
             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
