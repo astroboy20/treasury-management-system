@@ -43,7 +43,9 @@ export interface CalculationSnapshot {
 
 /**
  * The set of all named calculation rules in the system.
- * Each value corresponds to a SECURITY DEFINER PostgreSQL RPC function.
+ * Each value corresponds to a SECURITY DEFINER PostgreSQL RPC function,
+ * except COT_CHARGE_2_PER_MILLE and COT_CHARGE_5_PER_MILLE which are
+ * computed in TypeScript (pure arithmetic, no RPC needed).
  */
 export type CalculationRule =
   | 'PRE_LIQUIDATION_20_PERCENT'
@@ -57,6 +59,8 @@ export type CalculationRule =
   | 'INTERNAL_TRANSFER_NO_CHARGE'
   | 'FUNDS_IN'
   | 'FUNDS_OUT_AVAILABLE_BALANCE'
+  | 'COT_CHARGE_2_PER_MILLE'
+  | 'COT_CHARGE_5_PER_MILLE'
 
 // ─── Rollover type union (matches PostgreSQL CHECK constraint) ────────────────
 
@@ -115,6 +119,22 @@ export type AnniversaryPaymentResult = CalculationSnapshot & {
 export type MaturityTerminationResult = CalculationSnapshot & {
   /** principal + accrued_interest. WHT is 0 per SOP. */
   netAmount: string
+}
+
+/**
+ * The two COT rate tiers per the COT SOP.
+ *   MILLE_2 = ₦2 per mille  (₦2 per ₦1,000)
+ *   MILLE_5 = ₦5 per mille  (₦5 per ₦1,000)
+ */
+export type CotRateTier = 'MILLE_2' | 'MILLE_5'
+
+export type CotChargeResult = CalculationSnapshot & {
+  /** The COT charge amount. */
+  cotCharge: string
+  /** The applicable rate per mille as a string (e.g. "2" or "5"). */
+  ratePerMille: string
+  /** The transaction value that was used as the base. */
+  transactionValue: string
 }
 
 // ─── Internal helper ─────────────────────────────────────────────────────────
@@ -408,5 +428,71 @@ export async function calculateMaturityTermination(
   return {
     ...snapshot,
     netAmount: snapshot.outputs.net_amount,
+  }
+}
+
+/**
+ * Calculates the COT (Commission on Turnover) charge for Call Account and
+ * CMS (Cash Management Services) transactions.
+ *
+ * COT SOP formula:
+ *   COT Charge = (applicable_rate × transaction_value) ÷ 1,000
+ *
+ * Rate tiers:
+ *   MILLE_2 → ₦2  per mille  (multiply by 2, divide by 1,000)
+ *   MILLE_5 → ₦5  per mille  (multiply by 5, divide by 1,000)
+ *
+ * Examples (from COT SOP):
+ *   ₦100,000  @ MILLE_2 →  ₦200    @ MILLE_5 →  ₦500
+ *   ₦500,000  @ MILLE_2 → ₦1,000   @ MILLE_5 → ₦2,500
+ *   ₦1,000,000@ MILLE_2 → ₦2,000   @ MILLE_5 → ₦5,000
+ *
+ * This function is intentionally synchronous — no RPC is needed because
+ * the formula is pure arithmetic. The snapshot is constructed in TypeScript
+ * using the same precision conventions as other calculation functions and
+ * persisted in vouchers.calculation_snapshot for auditability.
+ *
+ * @param transactionValue  NUMERIC string — the gross withdrawal amount.
+ * @param rateTier          'MILLE_2' or 'MILLE_5'.
+ */
+export function calculateCOT(
+  transactionValue: string,
+  rateTier: CotRateTier,
+): CotChargeResult {
+  const value = parseFloat(transactionValue)
+  if (isNaN(value) || value < 0) {
+    throw new Error(
+      `calculateCOT: invalid transactionValue '${transactionValue}'. Must be a non-negative number.`,
+    )
+  }
+
+  const ratePerMille = rateTier === 'MILLE_2' ? 2 : 5
+
+  // COT = (rate × value) / 1000
+  // Use string-based rounding to 4 decimal places to avoid JS float drift.
+  const rawCharge = (ratePerMille * value) / 1000
+  const cotCharge = (Math.round(rawCharge * 1e4) / 1e4).toFixed(4)
+
+  const rule: CalculationRule =
+    rateTier === 'MILLE_2' ? 'COT_CHARGE_2_PER_MILLE' : 'COT_CHARGE_5_PER_MILLE'
+
+  const snapshot: CalculationSnapshot = {
+    rule,
+    inputs: {
+      transaction_value: transactionValue,
+      rate_per_mille: String(ratePerMille),
+      rate_tier: rateTier,
+    },
+    outputs: {
+      cot_charge: cotCharge,
+    },
+    calculated_at: new Date().toISOString(),
+  }
+
+  return {
+    ...snapshot,
+    cotCharge,
+    ratePerMille: String(ratePerMille),
+    transactionValue,
   }
 }

@@ -146,6 +146,7 @@ export async function prepareVoucherAction(
       calculateAnniversaryPayment,
       calculateMaturityTermination,
       calculateInternalTransfer,
+      calculateCOT,
     } = await import('@/lib/services/calculation.service')
 
     switch (txType) {
@@ -305,21 +306,70 @@ export async function prepareVoucherAction(
       // capturing the available_balance so it is persisted in
       // vouchers.calculation_snapshot for auditability (Req 24.2, 38.1, 38.4).
       // No interest calculation formula is applied here (Req 38.4).
+      //
+      // For CALL_FUNDS_OUT and CMS_FUNDS_OUT: additionally compute the COT charge
+      // (Commission on Turnover) per the COT SOP:
+      //   COT = (rate_per_mille × transaction_value) / 1,000
+      // Rate tier is selected by the Treasury Officer (MILLE_2 or MILLE_5).
+      // COT charge is persisted in the calculation_snapshot and in the
+      // voucher's `charge` column.
       case 'SAVINGS_FUNDS_OUT':
       case 'CALL_FUNDS_OUT':
       case 'CMS_FUNDS_OUT': {
         const availableBalance = String(investmentSnapshot.available_amount)
-        calculationSnapshot = {
-          rule: 'FUNDS_OUT_AVAILABLE_BALANCE' as import('@/lib/services/calculation.service').CalculationRule,
-          inputs: {
-            available_balance: availableBalance,
-            source: 'INVESTMENT_VERIFICATION_SNAPSHOT',
-            transaction_type: txType,
-          },
-          outputs: {
-            available_balance: availableBalance,
-          },
-          calculated_at: new Date().toISOString(),
+        const isCotTransaction = txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT'
+
+        if (isCotTransaction) {
+          // Extract cotRateTier from the submitted voucher form data
+          const savingsInput = parsed.data as import('@/lib/schemas/voucher.schema').FundsOutVoucherInput
+          const cotRateTier =
+            (savingsInput as Record<string, unknown>).cotRateTier as
+              import('@/lib/services/calculation.service').CotRateTier | undefined
+
+          if (!cotRateTier || !['MILLE_2', 'MILLE_5'].includes(cotRateTier)) {
+            return {
+              success: false,
+              error:
+                'COT rate tier is required for Call and CMS transactions. ' +
+                'Select ₦2 per mille or ₦5 per mille. (COT SOP)',
+            }
+          }
+
+          // calculateCOT is synchronous — no RPC needed
+          const cotResult = calculateCOT(availableBalance, cotRateTier)
+
+          // Merge COT result into the calculation snapshot, preserving the
+          // available_balance source context alongside the COT output.
+          calculationSnapshot = {
+            rule: cotResult.rule as import('@/lib/services/calculation.service').CalculationRule,
+            inputs: {
+              available_balance: availableBalance,
+              source: 'INVESTMENT_VERIFICATION_SNAPSHOT',
+              transaction_type: txType,
+              rate_per_mille: cotResult.ratePerMille,
+              rate_tier: cotRateTier,
+              transaction_value: availableBalance,
+            },
+            outputs: {
+              available_balance: availableBalance,
+              cot_charge: cotResult.cotCharge,
+            },
+            calculated_at: cotResult.calculated_at,
+          }
+        } else {
+          // SAVINGS_FUNDS_OUT: no COT charge
+          calculationSnapshot = {
+            rule: 'FUNDS_OUT_AVAILABLE_BALANCE' as import('@/lib/services/calculation.service').CalculationRule,
+            inputs: {
+              available_balance: availableBalance,
+              source: 'INVESTMENT_VERIFICATION_SNAPSHOT',
+              transaction_type: txType,
+            },
+            outputs: {
+              available_balance: availableBalance,
+            },
+            calculated_at: new Date().toISOString(),
+          }
         }
         break
       }
@@ -500,18 +550,32 @@ export async function prepareVoucherAction(
 
   // 8b-savings. For SAVINGS/CALL/CMS Funds-Out: override with available_balance
   //     and zero out principal/interest/wht/charge (Req 38.1, 38.2, 38.4).
+  //     For CALL/CMS: persist the COT charge from the calculation snapshot.
   if (
     (txType === 'SAVINGS_FUNDS_OUT' || txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT') &&
     voucherType === 'FUNDS_OUT'
   ) {
     const savingsData = parsed.data as import('@/lib/schemas/voucher.schema').FundsOutVoucherInput
     const availBal = savingsData.availableBalance ?? String(investmentSnapshot.available_amount)
+    const isCot = txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT'
+
+    // For CALL/CMS: read the server-computed COT charge from the snapshot
+    const cotCharge = isCot && calculationSnapshot
+      ? (calculationSnapshot.outputs as Record<string, string>).cot_charge ?? '0'
+      : '0'
+
     voucherData.available_balance = availBal
     voucherData.net_amount = availBal
     voucherData.principal = '0'
     voucherData.interest = '0'
     voucherData.wht = '0'
-    voucherData.charge = '0'
+    // For CALL/CMS: store the COT charge in the `charge` column for display
+    voucherData.charge = isCot ? cotCharge : '0'
+
+    // Store the cotRateTier in voucherData so it is persisted in calculation_snapshot
+    if (isCot && (savingsData as Record<string, unknown>).cotRateTier) {
+      voucherData.cot_rate_tier = (savingsData as Record<string, unknown>).cotRateTier
+    }
   }
 
   // 8c. For THIRD_PARTY_PAYMENT external transfers: validate all 6 PI fields

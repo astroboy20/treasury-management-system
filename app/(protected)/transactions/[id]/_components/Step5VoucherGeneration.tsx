@@ -286,12 +286,34 @@ function CalculationPreview({
                 {transactionType === 'CALL_FUNDS_OUT' ? 'Call' : transactionType === 'CMS_FUNDS_OUT' ? 'CMS' : 'Savings'} Funds-Out — Available Balance
               </p>
             </div>
+            {(transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT') && (
+              <>
+                <div className="sm:col-span-2">
+                  <p className="text-xs font-medium text-amber-700 mt-1">COT (Commission on Turnover) — select rate in form below</p>
+                </div>
+                <Field
+                  label="COT @ ₦2/mille (estimate)"
+                  value={
+                    parseFloat(snapshot.available_amount) > 0
+                      ? formatCurrency(String(Math.round((2 * parseFloat(snapshot.available_amount)) / 1000 * 1e4) / 1e4))
+                      : '—'
+                  }
+                />
+                <Field
+                  label="COT @ ₦5/mille (estimate)"
+                  value={
+                    parseFloat(snapshot.available_amount) > 0
+                      ? formatCurrency(String(Math.round((5 * parseFloat(snapshot.available_amount)) / 1000 * 1e4) / 1e4))
+                      : '—'
+                  }
+                />
+              </>
+            )}
             <div className="sm:col-span-2">
               <p className="text-xs text-blue-600/80">
-                Rule: FUNDS_OUT_AVAILABLE_BALANCE — available_balance is sourced from the
-                investment verification snapshot. No interest calculation formula is applied (Req 38.4).
-                The server records the payment and updates the account balance via the Eazybankz adapter
-                on Operations execution (Req 24.3).
+                {transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT'
+                  ? 'COT formula: (Rate per mille × Transaction Value) ÷ 1,000. Select the applicable rate tier in the form below. Server computes the authoritative COT charge.'
+                  : 'Rule: FUNDS_OUT_AVAILABLE_BALANCE — available_balance is sourced from the investment verification snapshot. No interest calculation formula is applied (Req 38.4).'}
               </p>
             </div>
           </>
@@ -350,9 +372,18 @@ function CalculationPreview({
                       : '—'
                   }
                 />
+                <Field
+                  label="Funds-Out to Customer (= Requested Payout)"
+                  value={
+                    <span className="font-semibold text-foreground">
+                      {formatCurrency(String(Number(requestedPayout)))}
+                    </span>
+                  }
+                />
                 <div className="sm:col-span-2">
                   <p className="text-xs text-blue-600/80">
-                    Rule: rebooked_principal = remaining_principal − charge.
+                    SOP 3: customer receives the full requested payout — the 20% charge is deducted from the rebooked principal, not from the customer payout.
+                    rebooked_principal = remaining_principal − charge.
                     Authoritative values computed server-side via PostgreSQL NUMERIC.
                   </p>
                 </div>
@@ -734,7 +765,7 @@ function FundsOutVoucherContent({ voucher }: { voucher: NonNullable<TransactionW
         <Field label="WHT" value={formatCurrency(voucher.wht ?? '0')} />
       )}
       {!isThirdPartyTransfer && (
-        <Field label="Charge (20% of interest)" value={formatCurrency(voucher.charge ?? '0')} />
+        <Field label="Charge (20% of accrued interest)" value={formatCurrency(voucher.charge ?? '0')} />
       )}
       {isThirdPartyTransfer && (
         <>
@@ -937,38 +968,54 @@ interface VariantFormProps {
  * principal/interest/WHT/charge fields are NOT shown. Interest is sourced
  * from Eazybankz and not internally calculated (Req 38.4).
  *
- * The `availableBalance` and `netAmount` fields are pre-filled from the
- * investment verification snapshot. The Treasury Officer confirms them and
- * adds a transfer date and optional remarks.
+ * For CALL_FUNDS_OUT and CMS_FUNDS_OUT: a COT rate selector is shown
+ * (₦2/mille or ₦5/mille per the COT SOP). The COT charge is computed
+ * server-side and displayed as a live preview.
  *
- * If an external payment is required (Req 38.3, 36.1), the Payment Instruction
- * sub-form is rendered by the parent via `REQUIRES_PAYMENT_INSTRUCTION`.
- *
- * Requirements: 38.1, 38.2, 38.3, 38.4, 24.1, 24.2, 36.1
+ * Requirements: 38.1, 38.2, 38.3, 38.4, 24.1, 24.2, 36.1, COT SOP
  */
-function SavingsFundsOutForm({ disabled, register, errors, snapshot, transactionType }: VariantFormProps) {
+function SavingsFundsOutForm({ disabled, register, errors, snapshot, transactionType, watch, setValue }: VariantFormProps) {
   const errs = errors as Record<string, { message?: string } | undefined>
-  const txTypeLabel =
-    transactionType === 'CALL_FUNDS_OUT'
-      ? 'Call'
-      : transactionType === 'CMS_FUNDS_OUT'
-        ? 'CMS'
-        : 'Savings'
+  const isCall = transactionType === 'CALL_FUNDS_OUT'
+  const isCms = transactionType === 'CMS_FUNDS_OUT'
+  const isCot = isCall || isCms
+  const txTypeLabel = isCall ? 'Call' : isCms ? 'CMS' : 'Savings'
+
+  // Live COT preview — computed in JS for display; server is authoritative
+  const watchedAvailBal = (watch?.('availableBalance' as never) as unknown) as string | undefined
+  const watchedCotTier = (watch?.('cotRateTier' as never) as unknown) as string | undefined
+  const availVal = parseFloat(watchedAvailBal ?? snapshot.available_amount ?? '0')
+  const ratePerMille = watchedCotTier === 'MILLE_5' ? 5 : watchedCotTier === 'MILLE_2' ? 2 : null
+  const estimatedCot =
+    ratePerMille !== null && isFinite(availVal) && availVal > 0
+      ? (Math.round((ratePerMille * availVal) / 1000 * 1e4) / 1e4)
+      : null
+
+  // Keep cotCharge field in sync with the live estimate so it's in the submitted payload
+  useEffect(() => {
+    if (!setValue || !isCot) return
+    if (estimatedCot !== null) {
+      setValue('cotCharge' as never, String(estimatedCot) as never, { shouldValidate: false })
+    }
+  }, [estimatedCot, isCot, setValue])
 
   return (
     <div className="space-y-4">
-      {/* Contextual notice: available_balance is primary (Req 38.2) */}
+      {/* Contextual notice */}
       <Alert>
-        <AlertTitle>{txTypeLabel} Funds-Out — Available Balance</AlertTitle>
+        <AlertTitle>{txTypeLabel} Funds-Out — Available Balance{isCot ? ' + COT Charge' : ''}</AlertTitle>
         <AlertDescription className="space-y-1">
           <span className="block">
-            The <strong>Available Balance</strong> shown below is sourced directly from the
-            investment verification snapshot (Step 4). No interest calculation is applied (Req 38.4).
+            The <strong>Available Balance</strong> is sourced from the investment verification snapshot.
+            No interest calculation is applied (Req 38.4).
           </span>
-          <span className="block text-xs text-muted-foreground">
-            Confirm the available balance and enter the transfer date before preparing the voucher.
-            If this is an external payment, complete the Payment Instruction block below.
-          </span>
+          {isCot && (
+            <span className="block">
+              <strong>COT (Commission on Turnover)</strong> applies to {txTypeLabel} transactions.
+              Select the applicable rate — ₦2 per mille or ₦5 per mille — before preparing the voucher.
+              Formula: COT = (Rate × Transaction Value) ÷ 1,000.
+            </span>
+          )}
         </AlertDescription>
       </Alert>
 
@@ -977,9 +1024,13 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
       <input type="hidden" {...(register('interest' as never))} value="0" />
       <input type="hidden" {...(register('wht' as never))} value="0" />
       <input type="hidden" {...(register('charge' as never))} value="0" />
+      {/* Thread transactionTypeHint so superRefine() can enforce cotRateTier for COT transactions */}
+      {isCot && (
+        <input type="hidden" {...(register('transactionTypeHint' as never))} value={transactionType} />
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {/* Available Balance — primary display (Req 38.1, 38.2) */}
+        {/* Available Balance */}
         <FormField
           id="sfo-available-balance"
           label="Available Balance (₦)"
@@ -997,11 +1048,11 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
           />
         </FormField>
 
-        {/* Net Amount — matches available balance for this voucher type */}
+        {/* Net Amount */}
         <FormField
           id="sfo-net-amount"
           label="Net Amount (₦)"
-          hint="Equals the available balance (no deductions for this type)"
+          hint="Equals the available balance for this type"
           error={errs.netAmount?.message}
         >
           <Input
@@ -1014,6 +1065,63 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
             className="text-sm"
           />
         </FormField>
+
+        {/* COT Rate selector — Call and CMS only (COT SOP) */}
+        {isCot && (
+          <>
+            <FormField
+              id="sfo-cot-rate"
+              label="COT Rate Tier"
+              hint="Select the applicable Commission on Turnover rate"
+              error={errs.cotRateTier?.message}
+            >
+              <select
+                id="sfo-cot-rate"
+                disabled={disabled}
+                {...(register('cotRateTier' as never))}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">Select rate…</option>
+                <option value="MILLE_2">₦2 per mille (₦2 per ₦1,000)</option>
+                <option value="MILLE_5">₦5 per mille (₦5 per ₦1,000)</option>
+              </select>
+            </FormField>
+
+            {/* COT Charge — live preview; server recomputes authoritative value */}
+            <FormField
+              id="sfo-cot-charge"
+              label="COT Charge (estimated)"
+              required={false}
+              hint="Server recomputes the authoritative COT on submit"
+              error={errs.cotCharge?.message}
+            >
+              <Input
+                id="sfo-cot-charge"
+                type="text"
+                inputMode="decimal"
+                disabled
+                value={estimatedCot !== null ? formatCurrency(String(estimatedCot)) : '—'}
+                readOnly
+                className="text-sm bg-muted/40 font-medium"
+              />
+              {/* Hidden registered field for form submission */}
+              <input type="hidden" {...(register('cotCharge' as never))} />
+            </FormField>
+
+            {/* Live COT calculation breakdown */}
+            {estimatedCot !== null && ratePerMille !== null && (
+              <div className="sm:col-span-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-1">
+                <p className="text-xs font-semibold text-amber-800">COT Calculation Preview</p>
+                <p className="font-mono text-xs text-amber-700">
+                  (₦{ratePerMille} × {formatCurrency(String(availVal))}) ÷ 1,000 = {formatCurrency(String(estimatedCot))}
+                </p>
+                <p className="text-[10px] text-amber-600/80">
+                  Authoritative value computed server-side.
+                </p>
+              </div>
+            )}
+          </>
+        )}
 
         <FormField id="sfo-transfer-date" label="Transfer Date" error={errs.transferDate?.message}>
           <Input id="sfo-transfer-date" type="date" disabled={disabled} {...register('transferDate' as never)} className="text-sm" />
@@ -1097,6 +1205,22 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
   // asked to enter the same number twice and the two values can't silently
   // diverge. Only auto-fills paymentInstruction.amount while the user hasn't
   // typed a different value into that field directly.
+  //
+  // FIX (SOP 3 — Partial Pre-Liquidation): per the SOP, the customer receives
+  // the full requested payout amount. The charge is deducted from the rebooked
+  // principal, NOT from the customer's payout. Auto-fill netAmount = requestedPayout
+  // so the Treasury Officer doesn't have to re-enter the same number, and the
+  // two values stay consistent.
+  useEffect(() => {
+    if (!setValue) return
+
+    // Partial pre-liquidation: netAmount = requestedPayout (SOP 3 — customer gets full requested amount)
+    if (isPreLiquidation && isPartialPreLiquidation && parsedPayout > 0 && isFinite(parsedPayout)) {
+      setValue('netAmount' as never, String(parsedPayout) as never, { shouldValidate: false })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedPayout, isPreLiquidation, isPartialPreLiquidation])
+
   useEffect(() => {
     if (!isThirdParty || isInternalPayment) return
     if (!setValue || !watch) return
@@ -1127,23 +1251,24 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
 
       {isPreLiquidation && !isPartialPreLiquidation && (
         <Alert>
-          <AlertTitle>Pre-Liquidation — Full (20% charge)</AlertTitle>
+          <AlertTitle>Pre-Liquidation — Full (20% charge on accrued interest)</AlertTitle>
           <AlertDescription>
-            The 20% charge on accrued interest has been pre-filled below. Net amount = principal +
-            (accrued interest − charge). Confirm these values before preparing the voucher.
-            For a partial pre-liquidation, enter a requested payout amount below.
+            Per SOP 3: charge = 20% × accrued interest. Net amount = principal + accrued interest − charge.
+            The charge and net amount have been pre-filled from the investment snapshot. Confirm before preparing the voucher.
+            To process a partial pre-liquidation instead, enter a requested payout amount below.
           </AlertDescription>
         </Alert>
       )}
       {isPreLiquidation && isPartialPreLiquidation && (
         <Alert>
-          <AlertTitle>Partial Pre-Liquidation — Intermediate Values</AlertTitle>
+          <AlertTitle>Partial Pre-Liquidation — SOP 3</AlertTitle>
           <AlertDescription className="space-y-1">
+            <span className="block text-xs font-semibold text-muted-foreground">Per SOP 3:</span>
             <span className="block">
-              Requested payout: <strong>{formatCurrency(String(parsedPayout))}</strong>
+              Customer receives full requested payout: <strong>{formatCurrency(String(parsedPayout))}</strong> — charge does NOT reduce the customer payout.
             </span>
             <span className="block">
-              Remaining principal (= principal − payout):{' '}
+              Remaining principal (principal − payout):{' '}
               <strong>
                 {remainingPrincipal !== null
                   ? formatCurrency(String(remainingPrincipal))
@@ -1155,16 +1280,18 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
               <strong>{formatCurrency(String(charge))}</strong>
             </span>
             <span className="block">
-              Rebooked principal (= remaining − charge):{' '}
+              Rebooked principal (remaining − charge):{' '}
               <strong>
                 {rebookedPrincipal !== null
                   ? formatCurrency(String(rebookedPrincipal))
                   : '—'}
               </strong>
             </span>
+            <span className="block">
+              Net Amount (Funds-Out to customer) = Requested Payout: <strong>{formatCurrency(String(parsedPayout))}</strong>
+            </span>
             <span className="block text-xs text-muted-foreground">
-              Authoritative values are computed server-side via PostgreSQL NUMERIC arithmetic.
-              These previews are estimates only. Confirm before preparing the voucher.
+              Authoritative values computed server-side via PostgreSQL NUMERIC. These are estimates only.
             </span>
           </AlertDescription>
         </Alert>
@@ -1271,7 +1398,13 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
         <FormField
           id="fo-net-amount"
           label={isThirdParty ? 'Net Amount / Transfer Amount (₦)' : 'Net Amount (₦)'}
-          hint={isThirdParty ? 'Enter the transfer amount; the Payment Instruction amount below stays in sync automatically' : 'Server will validate against snapshot'}
+          hint={
+            isThirdParty
+              ? 'Enter the transfer amount; the Payment Instruction amount below stays in sync automatically'
+              : isPartialPreLiquidation
+                ? 'Auto-filled from Requested Payout (SOP 3: customer receives full requested amount)'
+                : 'Server will validate against snapshot'
+          }
           error={errs.netAmount?.message}
         >
           <Input id="fo-net-amount" type="text" inputMode="decimal" placeholder="Computed net amount" disabled={disabled} {...register('netAmount' as never)} className="text-sm" />
@@ -1531,7 +1664,9 @@ function buildDefaults(
       ? (Math.round((accruedInterest - parseFloat(preLiqCharge)) * 1e4) / 1e4).toString()
       : ''
     const principal = parseFloat(snapshot?.principal ?? '0')
-    // For full PRE_LIQUIDATION: net amount = principal + net_interest (interest after charge deducted)
+    // For full PRE_LIQUIDATION: net amount = principal + net_interest (interest after charge deducted).
+    // For partial PRE_LIQUIDATION: netAmount starts empty — it is auto-filled from requestedPayout
+    // by the useEffect in FundsOutForm (SOP 3: customer receives full requested payout).
     const preLiqNetAmount = isPreLiquidation && isFinite(principal) && preLiqNetInterest
       ? (Math.round((principal + parseFloat(preLiqNetInterest)) * 1e4) / 1e4).toString()
       : ''
@@ -1548,6 +1683,11 @@ function buildDefaults(
         netAmount: snapshot?.available_amount ?? '',
         transferDate: todayStr,
         remarks: '',
+        // COT rate tier has no sensible default — the Treasury Officer must select
+        cotRateTier: undefined,
+        cotCharge: '0',
+        // Thread the transactionTypeHint so superRefine can enforce cotRateTier
+        transactionTypeHint: transactionType,
       } satisfies Partial<FundsOutVoucherInput>
     }
 

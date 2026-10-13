@@ -1,6 +1,13 @@
 import { z } from 'zod'
 
 // ============================================================
+// COT Rate Tier enum (COT SOP — Call Account and CMS)
+// ============================================================
+
+export const CotRateTierEnum = z.enum(['MILLE_2', 'MILLE_5'])
+export type CotRateTier = z.infer<typeof CotRateTierEnum>
+
+// ============================================================
 // Shared helpers
 // ============================================================
 
@@ -189,6 +196,21 @@ export const FundsOutVoucherSchema = z
     requestedPayout: positiveNumericString('Requested payout').optional(),
 
     /**
+     * COT Rate Tier — for CALL_FUNDS_OUT and CMS_FUNDS_OUT (COT SOP).
+     * Required for Call and CMS transactions; optional for all others.
+     * MILLE_2 = ₦2 per mille; MILLE_5 = ₦5 per mille.
+     * Formula: cot_charge = (rate × transaction_value) / 1,000.
+     */
+    cotRateTier: CotRateTierEnum.optional(),
+
+    /**
+     * COT Charge — computed server-side from cotRateTier and availableBalance.
+     * Submitted for display confirmation; server always recomputes.
+     * Only present for CALL_FUNDS_OUT and CMS_FUNDS_OUT.
+     */
+    cotCharge: numericString('COT charge').optional(),
+
+    /**
      * Payment Instruction block (Req 36).
      * Required for THIRD_PARTY_PAYMENT (is_internal = false) — all 6 fields enforced.
      * Optional for other FUNDS_OUT scenarios that may involve external payment.
@@ -276,6 +298,20 @@ export const FundsOutVoucherSchema = z
           message: 'Transfer charge is required for external payments.',
         })
       }
+    }
+
+    // COT SOP: CALL_FUNDS_OUT and CMS_FUNDS_OUT require a cotRateTier selection.
+    // cotCharge is computed server-side but cotRateTier must be provided by the user.
+    const isCotTransaction =
+      data.transactionTypeHint === 'CALL_FUNDS_OUT' ||
+      data.transactionTypeHint === 'CMS_FUNDS_OUT'
+
+    if (isCotTransaction && !data.cotRateTier) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cotRateTier'],
+        message: 'COT rate tier is required for Call and CMS transactions. Select ₦2/mille or ₦5/mille.',
+      })
     }
   })
 

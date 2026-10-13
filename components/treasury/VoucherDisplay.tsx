@@ -213,7 +213,7 @@ export function FundsOutVoucher({ voucher }: { voucher: VoucherData }) {
         {/* Partial pre-liquidation intermediate values */}
         {isPartialPreLiquidation && (
           <>
-            <Field label="Requested Payout" value={formatCurrency(snapInputs?.requested_payout ?? '0')} />
+            <Field label="Requested Payout (Funds-Out to Customer)" value={formatCurrency(snapInputs?.requested_payout ?? '0')} />
             <Field
               label="Remaining Principal (= Principal − Payout)"
               value={formatCurrency(snapOutputs?.remaining_principal ?? '—')}
@@ -222,6 +222,12 @@ export function FundsOutVoucher({ voucher }: { voucher: VoucherData }) {
               label="Rebooked Principal (= Remaining − Charge)"
               value={formatCurrency(snapOutputs?.rebooked_principal ?? '—')}
             />
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">SOP 3 Rule</dt>
+              <dd className="mt-1 font-mono text-xs text-muted-foreground">
+                Customer receives full requested payout — charge deducted from rebooked principal, not from customer payout.
+              </dd>
+            </div>
           </>
         )}
 
@@ -262,22 +268,78 @@ export function FundsOutVoucher({ voucher }: { voucher: VoucherData }) {
  * Uses `available_balance` as the primary amount field instead of the
  * principal/interest/WHT breakdown (Req 38.1, 38.2).
  *
- * Fields: available balance (prominent), transfer date, remarks,
- * + PaymentInstructionBlock if external (Req 38.3).
+ * For Call and CMS: also displays the COT charge computed from the selected
+ * rate tier (₦2/mille or ₦5/mille per the COT SOP).
+ *
+ * Fields: available balance (prominent), COT charge (Call/CMS only),
+ * transfer date, remarks, + PaymentInstructionBlock if external (Req 38.3).
  */
-export function SavingsFundsOutVoucher({ voucher }: { voucher: VoucherData }) {
+export function SavingsFundsOutVoucher({ voucher, transactionType }: { voucher: VoucherData; transactionType?: string }) {
+  const snap = voucher.calculation_snapshot as Record<string, unknown> | null
+  const snapOutputs = snap?.outputs as Record<string, string> | undefined
+  const snapInputs = snap?.inputs as Record<string, string> | undefined
+  const snapRule = snap?.rule as string | undefined
+
+  const isCot =
+    transactionType === 'CALL_FUNDS_OUT' ||
+    transactionType === 'CMS_FUNDS_OUT' ||
+    snapRule === 'COT_CHARGE_2_PER_MILLE' ||
+    snapRule === 'COT_CHARGE_5_PER_MILLE'
+
+  const cotCharge = snapOutputs?.cot_charge ?? voucher.charge ?? '0'
+  const ratePerMille = snapInputs?.rate_per_mille
+  const rateTier = snapInputs?.rate_tier
+
+  const txLabel =
+    transactionType === 'CALL_FUNDS_OUT'
+      ? 'Call Account'
+      : transactionType === 'CMS_FUNDS_OUT'
+        ? 'CMS'
+        : 'Savings'
+
   return (
     <div className="space-y-4">
       {/* Available Balance — primary display (Req 38.2) */}
       <div className="rounded-md border border-border bg-muted/30 px-4 py-3 flex items-center justify-between gap-2">
         <div>
-          <p className="text-xs font-medium text-muted-foreground">Available Balance</p>
+          <p className="text-xs font-medium text-muted-foreground">Available Balance — {txLabel}</p>
           <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
             {formatCurrency(voucher.available_balance)}
           </p>
         </div>
         <Banknote className="size-5 shrink-0 text-muted-foreground" aria-hidden />
       </div>
+
+      {/* COT charge block — only for Call and CMS (COT SOP) */}
+      {isCot && (
+        <div className="rounded-md border border-amber-200 bg-amber-50/60 px-4 py-3 space-y-2">
+          <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+            COT Charge (Commission on Turnover)
+          </p>
+          <dl className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Rate Applied</dt>
+              <dd className="mt-0.5 text-sm font-medium text-foreground">
+                {ratePerMille
+                  ? `₦${ratePerMille} per mille${rateTier === 'MILLE_2' ? ' (₦2/₦1,000)' : rateTier === 'MILLE_5' ? ' (₦5/₦1,000)' : ''}`
+                  : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">COT Charge</dt>
+              <dd className="mt-0.5 text-sm font-semibold tabular-nums text-amber-900">
+                {formatCurrency(cotCharge)}
+              </dd>
+            </div>
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">Formula</dt>
+              <dd className="mt-0.5 font-mono text-xs text-muted-foreground">
+                COT = (₦{ratePerMille ?? '?'} × {formatCurrency(voucher.available_balance)}) ÷ 1,000 = {formatCurrency(cotCharge)}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      )}
 
       <dl className="grid gap-3 sm:grid-cols-2">
         <Field label="Transfer Date" value={voucher.transfer_date ?? '—'} />
@@ -742,7 +804,7 @@ export function VoucherDisplay({
 
         {/* Route to the correct sub-component */}
         {voucher.voucher_type === 'FUNDS_OUT' && isSavingsLayout && (
-          <SavingsFundsOutVoucher voucher={voucher} />
+          <SavingsFundsOutVoucher voucher={voucher} transactionType={transactionType} />
         )}
 
         {voucher.voucher_type === 'FUNDS_OUT' && !isSavingsLayout && (

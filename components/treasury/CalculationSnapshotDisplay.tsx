@@ -53,6 +53,11 @@ const RULE_LABELS: Record<CalculationRule, string> = {
   ROLLOVER_INTEREST_ONLY:             'Rollover — Interest Only',
   MATURITY_TERMINATION:               'Maturity Termination',
   ANNIVERSARY_PAYMENT:                'Anniversary Payment',
+  INTERNAL_TRANSFER_NO_CHARGE:        'Internal Transfer — No Charge',
+  FUNDS_IN:                           'Funds-In (New Investment)',
+  FUNDS_OUT_AVAILABLE_BALANCE:        'Funds-Out — Available Balance',
+  COT_CHARGE_2_PER_MILLE:             'COT Charge — ₦2 per mille',
+  COT_CHARGE_5_PER_MILLE:             'COT Charge — ₦5 per mille',
 }
 
 // ─── Field classification helpers ────────────────────────────────────────────
@@ -79,6 +84,8 @@ const MONETARY_KEYS = new Set([
   'available_balance',
   'interest',
   'amount',
+  'cot_charge',
+  'transaction_value',
 ])
 
 /**
