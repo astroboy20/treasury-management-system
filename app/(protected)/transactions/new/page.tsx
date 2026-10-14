@@ -72,7 +72,7 @@ export default async function NewTransactionPage() {
           className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-center text-sm font-medium text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-background [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
         >
           <Layers className="size-3.5" aria-hidden />
-          Batch (up to 10)
+          Batch (up to 20)
         </Link>
       </div>
 
