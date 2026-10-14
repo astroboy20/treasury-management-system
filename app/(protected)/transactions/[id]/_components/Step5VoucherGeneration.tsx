@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
@@ -9,6 +9,8 @@ import {
   Calculator,
   Receipt,
   ArrowRight,
+  Plus,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -101,6 +103,16 @@ const VOUCHER_TYPE_LABELS: Record<VoucherType, string> = {
   FUNDS_OUT: 'Funds-Out Voucher',
   ROLLOVER_SLIP: 'Rollover Slip',
   TRANSFER_SLIP: 'Transfer Slip',
+}
+
+/** Returns a more specific voucher label for Savings/Call/CMS Funds-Out types */
+function getFundsOutLabel(transactionType: string): string {
+  switch (transactionType) {
+    case 'SAVINGS_FUNDS_OUT': return 'Savings Funds-Out Voucher'
+    case 'CALL_FUNDS_OUT':    return 'Call Funds-Out Voucher'
+    case 'CMS_FUNDS_OUT':     return 'CMS Funds-Out Voucher'
+    default:                  return VOUCHER_TYPE_LABELS.FUNDS_OUT
+  }
 }
 
 // Transaction types that require a Payment Instruction sub-form (Req 36)
@@ -277,7 +289,14 @@ function CalculationPreview({
       <dl className="grid gap-3 sm:grid-cols-2 text-sm">
         <Field label="Principal" value={formatCurrency(snapshot.principal)} />
         <Field label="Accrued Interest" value={formatCurrency(snapshot.accrued_interest)} />
-        <Field label="Interest Rate" value={formatRate(snapshot.interest_rate)} />
+        <Field
+          label="Interest Rate"
+          value={
+            (transactionType === 'SAVINGS_FUNDS_OUT' || transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT')
+              ? <span className="italic text-muted-foreground">N/A (balance-based)</span>
+              : formatRate(snapshot.interest_rate)
+          }
+        />
         <Field label="Available Amount" value={formatCurrency(snapshot.available_amount)} />
         {/* Savings/Call/CMS Funds-Out: available_balance is the primary field (Req 38.1, 38.2) */}
         {(transactionType === 'SAVINGS_FUNDS_OUT' || transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT') && (
@@ -315,7 +334,7 @@ function CalculationPreview({
               <p className="text-xs text-blue-600/80">
                 {transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT'
                   ? 'COT formula: (Rate per mille × Transaction Value) ÷ 1,000. Select the applicable rate tier in the form below. Server computes the authoritative COT charge.'
-                  : 'Rule: FUNDS_OUT_AVAILABLE_BALANCE — available_balance is sourced from the investment verification snapshot. No interest calculation formula is applied (Req 38.4).'}
+                  : 'Rule: FUNDS_OUT_AVAILABLE_BALANCE — available_balance is sourced from the investment verification snapshot. No interest calculation formula is applied.'}
               </p>
             </div>
           </>
@@ -342,7 +361,7 @@ function CalculationPreview({
               <>
                 <div className="sm:col-span-2">
                   <Separator className="my-1" />
-                  <p className="text-xs font-medium text-blue-700 mt-2">Partial pre-liquidation — intermediate values (Req 19.2)</p>
+                  <p className="text-xs font-medium text-blue-700 mt-2">Partial pre-liquidation — intermediate values</p>
                 </div>
                 <Field
                   label="Original Principal"
@@ -386,7 +405,7 @@ function CalculationPreview({
                   <p className="text-xs text-blue-600/80">
                     SOP 3: customer receives the full requested payout — the 20% charge is deducted from the rebooked principal, not from the customer payout.
                     rebooked_principal = remaining_principal − charge.
-                    Authoritative values computed server-side via PostgreSQL NUMERIC.
+                    The customer receives the full requested payout.
                   </p>
                 </div>
               </>
@@ -501,10 +520,10 @@ function CalculationPreview({
           </>
         )}
       </dl>
-      <p className="text-[10px] text-blue-600/70">
+      {/* <p className="text-[10px] text-blue-600/70">
         Authoritative calculations run server-side using PostgreSQL NUMERIC arithmetic.
         Values shown here are estimates only.
-      </p>
+      </p> */}
     </div>
   )
 }
@@ -682,7 +701,9 @@ function FinalisedVoucherDisplay({
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-foreground">
-              {VOUCHER_TYPE_LABELS[voucher.voucher_type as VoucherType] ?? voucher.voucher_type}
+              {SAVINGS_FUNDS_OUT_TYPES.has(transactionType ?? '')
+                ? getFundsOutLabel(transactionType ?? '')
+                : VOUCHER_TYPE_LABELS[voucher.voucher_type as VoucherType] ?? voucher.voucher_type}
             </p>
             <Badge
               variant={isFinalised ? 'default' : 'secondary'}
@@ -716,7 +737,7 @@ function FinalisedVoucherDisplay({
       {/* Payment instruction block */}
       {voucher.payment_instruction && (
         <PaymentInstructionBlock
-          instruction={voucher.payment_instruction}
+          instruction={voucher.payment_instruction as Record<string, unknown> | Record<string, unknown>[]}
           transactionType={transactionType}
         />
       )}
@@ -933,42 +954,53 @@ function PaymentInstructionBlock({
   instruction,
   transactionType,
 }: {
-  instruction: Record<string, unknown>
+  instruction: Record<string, unknown> | Record<string, unknown>[]
   transactionType?: string
 }) {
+  // Normalise to array — single object or array both handled
+  const entries: Record<string, unknown>[] = Array.isArray(instruction) ? instruction : [instruction]
   const isCotTransaction = transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT'
-  const isInternal = instruction.is_internal === true || instruction.is_internal === 'true' ||
-    instruction.isInternal === true || instruction.isInternal === 'true'
-  const transferCharge = String(instruction.transfer_charge ?? instruction.transferCharge ?? '0')
 
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
       <div className="flex items-center gap-2">
         <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <p className="text-xs font-semibold text-foreground">Payment Instruction</p>
+        <p className="text-xs font-semibold text-foreground">
+          Payment {entries.length > 1 ? `Instructions (${entries.length})` : 'Instruction'}
+        </p>
       </div>
-      <dl className="grid gap-3 sm:grid-cols-2">
-        <Field label="Beneficiary Name" value={String(instruction.beneficiary_name ?? instruction.beneficiaryName ?? '—')} />
-        <Field label="Bank Name" value={String(instruction.bank_name ?? instruction.bankName ?? '—')} />
-        <Field label="Account Number" value={String(instruction.account_number ?? instruction.accountNumber ?? '—')} />
-        <Field label="Account Type" value={String(instruction.account_type ?? instruction.accountType ?? '—')} />
-        <Field label="Amount" value={formatCurrency(String(instruction.amount ?? '0'))} />
-        {/* Transfer Charge only applies to THIRD_PARTY_PAYMENT (0.10%).
-            Not shown for CALL/CMS — those carry a COT charge shown above. */}
-        {!isCotTransaction && (
-          <Field
-            label={isInternal ? 'Transfer Charge' : 'Transfer Charge (0.10%)'}
-            value={
-              <span className={isInternal || parseFloat(transferCharge) === 0 ? 'text-muted-foreground' : 'font-medium text-foreground'}>
-                {isInternal ? '₦0.00 (internal — no charge)' : formatCurrency(transferCharge)}
-              </span>
-            }
-          />
-        )}
-        {Boolean(instruction.purpose) && (
-          <Field label="Purpose" value={String(instruction.purpose)} />
-        )}
-      </dl>
+      {entries.map((instr, idx) => {
+        const isInternal = instr.is_internal === true || instr.is_internal === 'true' ||
+          instr.isInternal === true || instr.isInternal === 'true'
+        const transferCharge = String(instr.transfer_charge ?? instr.transferCharge ?? '0')
+        return (
+          <div key={idx} className={entries.length > 1 ? 'border-t border-border/60 pt-3 first:border-t-0 first:pt-0' : ''}>
+            {entries.length > 1 && (
+              <p className="mb-2 text-[11px] font-semibold text-muted-foreground">Beneficiary {idx + 1}</p>
+            )}
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <Field label="Beneficiary Name" value={String(instr.beneficiary_name ?? instr.beneficiaryName ?? '—')} />
+              <Field label="Bank Name" value={String(instr.bank_name ?? instr.bankName ?? '—')} />
+              <Field label="Account Number" value={String(instr.account_number ?? instr.accountNumber ?? '—')} />
+              <Field label="Account Type" value={String(instr.account_type ?? instr.accountType ?? '—')} />
+              <Field label="Amount" value={formatCurrency(String(instr.amount ?? '0'))} />
+              {!isCotTransaction && (
+                <Field
+                  label={isInternal ? 'Transfer Charge' : 'Transfer Charge (0.10%)'}
+                  value={
+                    <span className={isInternal || parseFloat(transferCharge) === 0 ? 'text-muted-foreground' : 'font-medium text-foreground'}>
+                      {isInternal ? '₦0.00 (internal — no charge)' : formatCurrency(transferCharge)}
+                    </span>
+                  }
+                />
+              )}
+              {Boolean(instr.purpose) && (
+                <Field label="Purpose" value={String(instr.purpose)} />
+              )}
+            </dl>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -988,7 +1020,42 @@ interface VariantFormProps {
   transactionType?: string
   /** Whether this THIRD_PARTY_PAYMENT is an internal transfer (Req 21.1, 21.3) */
   isInternalPayment?: boolean
+  /**
+   * For Savings/Call/CMS: a ref the child form can write a sync callback into.
+   * The parent calls it before submit to flush PI entries into RHF state.
+   * Returns false if PI validation failed.
+   */
+  piSyncRef?: React.MutableRefObject<(() => boolean) | null>
+  /**
+   * For Savings/Call/CMS: a ref the parent owns. The child validates PI entries
+   * and writes the clean array directly here — bypassing RHF entirely.
+   * onSubmit reads from this ref and passes it straight to prepareVoucherAction.
+   */
+  piDataRef?: React.MutableRefObject<Record<string, unknown> | Record<string, unknown>[] | null>
+  /**
+   * For Savings/Call/CMS resubmission: existing payment_instruction(s) from the
+   * previously-prepared voucher that was returned. Used to seed piEntries on mount.
+   */
+  existingVoucherPi?: Record<string, unknown> | Record<string, unknown>[] | null
 }
+
+// ─── Multi-entry payment instruction row type ─────────────────────────────────
+
+interface PiEntry {
+  id: string
+  beneficiaryName: string
+  bankName: string
+  accountNumber: string
+  accountType: string
+  amount: string
+  purpose: string
+}
+
+function makePiEntry(id: string): PiEntry {
+  return { id, beneficiaryName: '', bankName: '', accountNumber: '', accountType: '', amount: '', purpose: '' }
+}
+
+const ACCOUNT_TYPE_OPTS = ['SAVINGS', 'CURRENT', 'DOMICILIARY', 'CORPORATE', 'CMS', 'CALL', 'COMMERCIAL_PAPER', 'PERSONAL']
 
 // ─── Savings/Call/CMS Funds-Out form (Req 38) ────────────────────────────────
 
@@ -1003,51 +1070,171 @@ interface VariantFormProps {
  * (₦2/mille or ₦5/mille per the COT SOP). The COT charge is computed
  * server-side and displayed as a live preview.
  *
+ * Multiple payment instruction entries are supported — the entries are
+ * serialised as a JSON array and written into the single paymentInstruction
+ * field before the RHF form submission fires.
+ *
  * Requirements: 38.1, 38.2, 38.3, 38.4, 24.1, 24.2, 36.1, COT SOP
  */
-function SavingsFundsOutForm({ disabled, register, errors, snapshot, transactionType, watch, setValue }: VariantFormProps) {
+function SavingsFundsOutForm({ disabled, register, errors, snapshot, transactionType, watch, setValue, piSyncRef, piDataRef, existingVoucherPi }: VariantFormProps) {
   const errs = errors as Record<string, { message?: string } | undefined>
   const isCall = transactionType === 'CALL_FUNDS_OUT'
   const isCms = transactionType === 'CMS_FUNDS_OUT'
   const isCot = isCall || isCms
   const txTypeLabel = isCall ? 'Call' : isCms ? 'CMS' : 'Savings'
 
-  // Live COT preview — computed in JS for display; server is authoritative
+  // ── Payment instruction entries ─────────────────────────────────────────────
+  // Seed from the previously-saved voucher PI when resubmitting a RETURNED transaction.
+  const [piEntries, setPiEntries] = useState<PiEntry[]>(() => {
+    if (existingVoucherPi) {
+      const raw = Array.isArray(existingVoucherPi) ? existingVoucherPi : [existingVoucherPi]
+      const seeded = raw.map(r => ({
+        id: crypto.randomUUID(),
+        beneficiaryName:  String(r.beneficiaryName ?? r.beneficiary_name ?? ''),
+        bankName:         String(r.bankName         ?? r.bank_name        ?? ''),
+        accountNumber:    String(r.accountNumber    ?? r.account_number   ?? ''),
+        accountType:      String(r.accountType      ?? r.account_type     ?? ''),
+        amount:           String(r.amount           ?? ''),
+        purpose:          String(r.purpose          ?? ''),
+      }))
+      if (seeded.length > 0) return seeded
+    }
+    return [makePiEntry(crypto.randomUUID())]
+  })
+  const [piErrors, setPiErrors] = useState<Record<string, Partial<Record<keyof PiEntry, string>>>>({})
+
+  const addPiEntry = useCallback(() => {
+    // Validate the current last entry before allowing a new one to be added
+    const last = piEntries[piEntries.length - 1]
+    if (last) {
+      const fieldErrors: Partial<Record<keyof PiEntry, string>> = {}
+      if (!last.beneficiaryName.trim()) fieldErrors.beneficiaryName = 'Required'
+      if (!last.bankName.trim())        fieldErrors.bankName = 'Required'
+      if (!last.accountNumber.trim())   fieldErrors.accountNumber = 'Required'
+      if (!last.amount.trim() || isNaN(parseFloat(last.amount)) || parseFloat(last.amount) <= 0) {
+        fieldErrors.amount = 'Valid amount required'
+      }
+      if (Object.keys(fieldErrors).length > 0) {
+        setPiErrors(prev => ({ ...prev, [last.id]: fieldErrors }))
+        return // block adding until the current entry is complete
+      }
+    }
+    setPiEntries(prev => [...prev, makePiEntry(crypto.randomUUID())])
+  }, [piEntries])
+
+  const removePiEntry = useCallback((id: string) => {
+    setPiEntries(prev => prev.length > 1 ? prev.filter(e => e.id !== id) : prev)
+    setPiErrors(prev => { const next = { ...prev }; delete next[id]; return next })
+  }, [])
+
+  const updatePiEntry = useCallback((id: string, field: keyof PiEntry, value: string) => {
+    setPiEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e))
+    // Clear field error on change
+    setPiErrors(prev => {
+      const entry = prev[id]
+      if (!entry) return prev
+      const next = { ...entry }
+      delete next[field]
+      return { ...prev, [id]: next }
+    })
+  }, [])
+
+  // Sync PI entries → RHF before the form submits.
+  // Returns true if valid, false if validation fails.
+  // PI is REQUIRED for these transaction types — an all-blank single entry is invalid.
+  const syncPiToForm = useCallback(() => {
+    const newErrors: Record<string, Partial<Record<keyof PiEntry, string>>> = {}
+    let hasError = false
+
+    // Validate every entry — PI is mandatory
+    for (const e of piEntries) {
+      const fieldErrors: Partial<Record<keyof PiEntry, string>> = {}
+      if (!e.beneficiaryName.trim()) { fieldErrors.beneficiaryName = 'Required'; hasError = true }
+      if (!e.bankName.trim())        { fieldErrors.bankName = 'Required'; hasError = true }
+      if (!e.accountNumber.trim())   { fieldErrors.accountNumber = 'Required'; hasError = true }
+      if (!e.amount.trim() || isNaN(parseFloat(e.amount)) || parseFloat(e.amount) <= 0) {
+        fieldErrors.amount = 'Valid amount required'; hasError = true
+      }
+      if (Object.keys(fieldErrors).length) newErrors[e.id] = fieldErrors
+    }
+
+    // Balance check — total must not exceed net amount (after COT for Call/CMS).
+    // Read netAmount from RHF — it's kept in sync by the COT useEffect.
+    const netAmountStr = (watch?.('netAmount' as never) as unknown) as string | undefined
+    const availBal = parseFloat(snapshot.available_amount ?? '0')
+    const spendable = isCot && netAmountStr && parseFloat(netAmountStr) > 0
+      ? parseFloat(netAmountStr)
+      : availBal
+    const totalAmount = piEntries.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0)
+    if (!hasError && isFinite(spendable) && spendable > 0 && totalAmount > spendable) {
+      for (const e of piEntries) {
+        newErrors[e.id] = {
+          ...(newErrors[e.id] ?? {}),
+          amount: `Total (${formatCurrency(String(totalAmount))}) exceeds ${isCot ? 'net amount after COT' : 'available balance'} (${formatCurrency(String(spendable))})`,
+        }
+      }
+      hasError = true
+    }
+
+    if (hasError) { setPiErrors(newErrors); return false }
+
+    setPiErrors({})
+    // Strip the internal `id` field (React key) before persisting
+    const toSave = piEntries.map(({ id: _id, ...rest }) => rest)
+    // Write directly to the parent's data ref — bypasses RHF entirely.
+    // RHF cannot hold arrays through hidden inputs so we skip setValue here.
+    if (piDataRef) {
+      piDataRef.current = toSave.length === 1 ? toSave[0] : toSave
+    }
+    return true
+  }, [piEntries, piDataRef, isCot, watch, snapshot.available_amount])
+
+  // Register sync fn into parent ref so onSubmit can call it
+  useEffect(() => {
+    if (piSyncRef) piSyncRef.current = syncPiToForm
+    return () => { if (piSyncRef) piSyncRef.current = null }
+  }, [piSyncRef, syncPiToForm])
+
+  // ── COT preview ─────────────────────────────────────────────────────────────
   const watchedAvailBal = (watch?.('availableBalance' as never) as unknown) as string | undefined
-  const watchedCotTier = (watch?.('cotRateTier' as never) as unknown) as string | undefined
+  const watchedCotTier  = (watch?.('cotRateTier' as never) as unknown) as string | undefined
   const availVal = parseFloat(watchedAvailBal ?? snapshot.available_amount ?? '0')
   const ratePerMille = watchedCotTier === 'MILLE_5' ? 5 : watchedCotTier === 'MILLE_2' ? 2 : null
   const estimatedCot =
     ratePerMille !== null && isFinite(availVal) && availVal > 0
       ? (Math.round((ratePerMille * availVal) / 1000 * 1e4) / 1e4)
       : null
-
-  // Net amount = available balance - COT charge (COT SOP)
   const estimatedNetAmount =
     isCot && estimatedCot !== null
       ? (Math.round((availVal - estimatedCot) * 1e4) / 1e4)
       : availVal
 
-  // On mount and whenever snapshot changes: push values into RHF via setValue.
-  // JSX `defaultValue` and plain `value` on hidden inputs do NOT update RHF's
-  // internal store — only setValue() does. This is the single source of truth.
+  // Push snapshot values into RHF on mount / snapshot change.
+  // Using setValue here because the hidden inputs (principal, interest, wht, charge)
+  // use a static value="0" in JSX which RHF ignores — setValue is the only way to
+  // ensure RHF's internal store has the correct value at submit time.
   useEffect(() => {
     if (!setValue) return
     const avail = snapshot.available_amount ?? '0'
+    // Numeric fields for the Zod schema
+    setValue('principal' as never, '0' as never, { shouldValidate: false })
+    setValue('interest' as never, '0' as never, { shouldValidate: false })
+    setValue('wht' as never, '0' as never, { shouldValidate: false })
+    setValue('charge' as never, '0' as never, { shouldValidate: false })
     setValue('availableBalance' as never, avail as never, { shouldValidate: false })
     setValue('netAmount' as never, avail as never, { shouldValidate: false })
-    setValue('paymentInstruction.amount' as never, avail as never, { shouldValidate: false })
+    if (isCot) {
+      setValue('transactionTypeHint' as never, transactionType as never, { shouldValidate: false })
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.available_amount])
 
-  // Keep cotCharge and netAmount in sync once COT rate is selected
+  // Keep COT-derived values in sync
   useEffect(() => {
     if (!setValue || !isCot) return
     if (estimatedCot !== null) {
       setValue('cotCharge' as never, String(estimatedCot) as never, { shouldValidate: false })
-      const net = String(estimatedNetAmount)
-      setValue('netAmount' as never, net as never, { shouldValidate: false })
-      setValue('paymentInstruction.amount' as never, net as never, { shouldValidate: false })
+      setValue('netAmount' as never, String(estimatedNetAmount) as never, { shouldValidate: false })
     }
   }, [estimatedCot, estimatedNetAmount, isCot, setValue])
 
@@ -1059,7 +1246,7 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
         <AlertDescription className="space-y-1">
           <span className="block">
             The <strong>Available Balance</strong> is sourced from the investment verification snapshot.
-            No interest calculation is applied (Req 38.4).
+            No interest calculation is applied.
           </span>
           {isCot && (
             <span className="block">
@@ -1071,18 +1258,15 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
         </AlertDescription>
       </Alert>
 
-      {/* Hidden fields so the FUNDS_OUT Zod schema passes validation for unused numeric fields */}
-      <input type="hidden" {...(register('principal' as never))} value="0" />
-      <input type="hidden" {...(register('interest' as never))} value="0" />
-      <input type="hidden" {...(register('wht' as never))} value="0" />
-      <input type="hidden" {...(register('charge' as never))} value="0" />
-      {/* Thread transactionTypeHint so superRefine() can enforce cotRateTier for COT transactions */}
-      {isCot && (
-        <input type="hidden" {...(register('transactionTypeHint' as never))} value={transactionType} />
-      )}
+      {/* Hidden fields managed via setValue in useEffect above */}
+      <input type="hidden" {...(register('principal' as never))} />
+      <input type="hidden" {...(register('interest' as never))} />
+      <input type="hidden" {...(register('wht' as never))} />
+      <input type="hidden" {...(register('charge' as never))} />
+      {isCot && <input type="hidden" {...(register('transactionTypeHint' as never))} />}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {/* Available Balance — driven by setValue on mount */}
+        {/* Available Balance */}
         <FormField
           id="sfo-available-balance"
           label="Available Balance (₦)"
@@ -1099,11 +1283,11 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
           />
         </FormField>
 
-        {/* Net Amount — driven entirely by setValue above, read-only for COT */}
+        {/* Net Amount */}
         <FormField
           id="sfo-net-amount"
           label="Net Amount (₦)"
-          hint={isCot ? "Available Balance minus COT Charge" : "Equals the available balance for this type"}
+          hint={isCot ? 'Available Balance minus COT Charge' : 'Equals the available balance for this type'}
           error={errs.netAmount?.message}
         >
           <Input
@@ -1117,7 +1301,7 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
           />
         </FormField>
 
-        {/* COT Rate selector — Call and CMS only (COT SOP) */}
+        {/* COT Rate — Call and CMS only */}
         {isCot && (
           <>
             <FormField
@@ -1138,7 +1322,6 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
               </select>
             </FormField>
 
-            {/* COT Charge — live preview; server recomputes authoritative value */}
             <FormField
               id="sfo-cot-charge"
               label="COT Charge (estimated)"
@@ -1155,11 +1338,9 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
                 readOnly
                 className="text-sm bg-muted/40 font-medium"
               />
-              {/* Hidden registered field for form submission */}
               <input type="hidden" {...(register('cotCharge' as never))} />
             </FormField>
 
-            {/* Live COT calculation breakdown */}
             {estimatedCot !== null && ratePerMille !== null && (
               <div className="sm:col-span-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-1">
                 <p className="text-xs font-semibold text-amber-800">COT Calculation Preview</p>
@@ -1182,6 +1363,197 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
       <FormField id="sfo-remarks" label="Remarks" required={false} error={errs.remarks?.message}>
         <Textarea id="sfo-remarks" rows={2} maxLength={1000} placeholder="Optional remarks…" disabled={disabled} {...register('remarks' as never)} className="resize-none text-sm" />
       </FormField>
+
+      {/* ── Payment Instructions (multi-entry) ────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <p className="text-xs font-semibold text-foreground">
+              Payment Instructions
+              <span className="ml-1.5 font-normal text-muted-foreground">(optional — add one per beneficiary)</span>
+            </p>
+          </div>
+          {!disabled && (
+            <button
+              type="button"
+              onClick={addPiEntry}
+              className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <Plus className="size-3" />
+              Add beneficiary
+            </button>
+          )}
+        </div>
+
+        {/* Live balance tracker */}
+        {(() => {
+          // estimatedNetAmount = availVal when no COT rate selected yet,
+          // = availVal - COT once rate is chosen.
+          const spendable = estimatedNetAmount
+          const total = piEntries.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0)
+          const remaining = spendable - total
+          const isOver = total > spendable && spendable > 0
+          if (total <= 0) return null
+          const cotPending = isCot && estimatedCot === null
+          return (
+            <div className={`rounded-md px-3 py-2 text-xs space-y-0.5 ${
+              isOver
+                ? 'bg-destructive/10 border border-destructive/30 text-destructive'
+                : 'bg-muted/40 border border-border text-muted-foreground'
+            }`}>
+              <div className="flex items-center justify-between gap-3">
+                <span>Total allocated: <strong>{formatCurrency(String(total))}</strong></span>
+                <span>
+                  {isOver
+                    ? `Exceeds net by ${formatCurrency(String(Math.abs(remaining)))}`
+                    : `Remaining: ${formatCurrency(String(remaining))}`}
+                </span>
+              </div>
+              {cotPending && (
+                <p className="text-[10px] text-amber-600">
+                  Select a COT rate above — remaining will update once the net amount is computed.
+                </p>
+              )}
+              {isCot && estimatedCot !== null && (
+                <p className="text-[10px] text-muted-foreground/70">
+                  Based on net after COT: {formatCurrency(String(spendable))}
+                </p>
+              )}
+            </div>
+          )
+        })()}
+
+        {piEntries.map((entry, idx) => {
+          const entryErrs = piErrors[entry.id] ?? {}
+          return (
+            <div
+              key={entry.id}
+              className="rounded-lg border border-border bg-muted/20 p-4 space-y-3"
+            >
+              {/* Row header */}
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Beneficiary {idx + 1}
+                </p>
+                {piEntries.length > 1 && !disabled && (
+                  <button
+                    type="button"
+                    onClick={() => removePiEntry(entry.id)}
+                    className="inline-flex size-6 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
+                    aria-label={`Remove beneficiary ${idx + 1}`}
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                )}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {/* Beneficiary Name */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    Beneficiary Name <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    placeholder="Full legal name"
+                    disabled={disabled}
+                    value={entry.beneficiaryName}
+                    onChange={e => updatePiEntry(entry.id, 'beneficiaryName', e.target.value)}
+                    className="text-sm"
+                  />
+                  {entryErrs.beneficiaryName && (
+                    <p className="text-xs text-destructive">{entryErrs.beneficiaryName}</p>
+                  )}
+                </div>
+
+                {/* Bank Name */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    Bank Name <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    placeholder="e.g. First Bank of Nigeria"
+                    disabled={disabled}
+                    value={entry.bankName}
+                    onChange={e => updatePiEntry(entry.id, 'bankName', e.target.value)}
+                    className="text-sm"
+                  />
+                  {entryErrs.bankName && (
+                    <p className="text-xs text-destructive">{entryErrs.bankName}</p>
+                  )}
+                </div>
+
+                {/* Account Number */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    Account Number <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    placeholder="10-digit NUBAN"
+                    maxLength={10}
+                    inputMode="numeric"
+                    disabled={disabled}
+                    value={entry.accountNumber}
+                    onChange={e => updatePiEntry(entry.id, 'accountNumber', e.target.value)}
+                    className="text-sm"
+                  />
+                  {entryErrs.accountNumber && (
+                    <p className="text-xs text-destructive">{entryErrs.accountNumber}</p>
+                  )}
+                </div>
+
+                {/* Account Type */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Account Type</Label>
+                  <select
+                    disabled={disabled}
+                    value={entry.accountType}
+                    onChange={e => updatePiEntry(entry.id, 'accountType', e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">Select type…</option>
+                    {ACCOUNT_TYPE_OPTS.map(t => (
+                      <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Amount */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    Amount (₦) <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="e.g. 1500000.00"
+                    disabled={disabled}
+                    value={entry.amount}
+                    onChange={e => updatePiEntry(entry.id, 'amount', e.target.value)}
+                    className="text-sm"
+                  />
+                  {entryErrs.amount && (
+                    <p className="text-xs text-destructive">{entryErrs.amount}</p>
+                  )}
+                </div>
+
+                {/* Purpose */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Purpose</Label>
+                  <Input
+                    placeholder="Optional purpose / narration"
+                    disabled={disabled}
+                    value={entry.purpose}
+                    onChange={e => updatePiEntry(entry.id, 'purpose', e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
     </div>
   )
 }
@@ -1726,7 +2098,6 @@ function buildDefaults(
 
     // Savings/Call/CMS Funds-Out: pre-fill availableBalance from snapshot (Req 38.1)
     if (isSavingsFundsOut) {
-      const isCotType = transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT'
       const availAmount = snapshot?.available_amount ?? ''
       return {
         voucherType: 'FUNDS_OUT',
@@ -1735,30 +2106,14 @@ function buildDefaults(
         wht: '0',
         charge: '0',
         availableBalance: availAmount,
-        // Net amount starts as available balance; COT useEffect will subtract the charge
-        // once the Treasury Officer selects a rate tier.
         netAmount: availAmount,
         transferDate: todayStr,
         remarks: '',
-        // COT rate tier has no sensible default — the Treasury Officer must select
         cotRateTier: undefined,
         cotCharge: '0',
-        // Thread the transactionTypeHint so superRefine can enforce cotRateTier
         transactionTypeHint: transactionType,
-        // Pre-fill transfer amount from available balance for Call/CMS so the field
-        // is never blank. The sync useEffect will update it once COT is selected.
-        paymentInstruction: isCotType
-          ? {
-              beneficiaryName: '',
-              bankName: '',
-              accountNumber: '',
-              accountType: '',
-              amount: availAmount,
-              transferCharge: '0',
-              purpose: '',
-              isInternal: false,
-            }
-          : undefined,
+        // paymentInstruction is managed by SavingsFundsOutForm local state — not pre-filled here
+        paymentInstruction: undefined,
       } satisfies Partial<FundsOutVoucherInput>
     }
 
@@ -1902,6 +2257,13 @@ export default function Step5VoucherGeneration({
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
 
+  // Ref that SavingsFundsOutForm writes its validated PI entries into.
+  // We bypass RHF entirely for PI data — RHF can't hold arrays in hidden inputs.
+  // Shape: null (untouched), false (validation failed), or the serialised entries.
+  const piDataRef = React.useRef<Record<string, unknown> | Record<string, unknown>[] | null>(null)
+  // Ref for the sync/validate callback — returns true if PI is valid, false if not
+  const piSyncRef = React.useRef<(() => boolean) | null>(null)
+
   // Derive isInternalPayment from the transaction's payment instruction (Req 21.1, 21.3)
   const isInternalPayment = existingPaymentInstruction?.is_internal ?? false
 
@@ -1913,7 +2275,7 @@ export default function Step5VoucherGeneration({
     || transactionType === 'MATURITY_TERMINATION'
     || transactionType === 'ANNIVERSARY_PAYMENT'
     || transactionType === 'PRE_LIQUIDATION'
-    || SAVINGS_FUNDS_OUT_TYPES.has(transactionType)
+    // SAVINGS/CALL/CMS handle payment instructions internally in SavingsFundsOutForm
     // ROLLOVER only needs a payment instruction for scenarios where money leaves the company
     || (transactionType === 'ROLLOVER' && (
       scenarioCode === 'PRINCIPAL_ONLY' ||
@@ -1961,15 +2323,34 @@ export default function Step5VoucherGeneration({
   }, [investmentVerification?.id, resolvedVoucherType, scenarioCode, transactionType, isInternalPayment])
 
   async function onSubmit(data: VoucherPreparationInput) {
+    // For Savings/Call/CMS: validate PI entries and get the data from piDataRef.
+    // piSyncRef.current() validates, writes to piDataRef, returns false on error.
+    if (SAVINGS_FUNDS_OUT_TYPES.has(transactionType)) {
+      if (piSyncRef.current) {
+        const valid = piSyncRef.current()
+        if (!valid) {
+          setServerError('Please complete all payment instruction fields before preparing the voucher.')
+          return
+        }
+      }
+    }
+
     setSubmitting(true)
     setServerError(null)
 
-    // Dynamically import to avoid bundling server code with this client component
     const { prepareVoucherAction } = await import('@/lib/actions/voucher.actions') as {
       prepareVoucherAction: PrepareVoucherAction
     }
 
-    const result = await prepareVoucherAction(transactionId, data)
+    // Inject the PI data from the ref directly into the input object.
+    // This bypasses RHF — which cannot hold arrays — and sends it straight to the action.
+    // Cast through unknown to avoid the discriminated-union type conflict.
+    const inputWithPi =
+      SAVINGS_FUNDS_OUT_TYPES.has(transactionType) && piDataRef.current
+        ? ({ ...data, paymentInstruction: piDataRef.current } as unknown as VoucherPreparationInput)
+        : data
+
+    const result = await prepareVoucherAction(transactionId, inputWithPi)
     setSubmitting(false)
 
     if (result.success) {
@@ -2010,6 +2391,11 @@ export default function Step5VoucherGeneration({
     scenarioCode,
     transactionType,
     isInternalPayment,
+    piSyncRef,
+    piDataRef,
+    existingVoucherPi: isReturned && voucher?.payment_instruction
+      ? voucher.payment_instruction as Record<string, unknown> | Record<string, unknown>[]
+      : null,
     snapshot: investmentVerification ?? {
       id: '', verified_by: '', source_system: 'EAZYBANKZ',
       principal: '0', accrued_interest: '0', interest_rate: '0',
@@ -2050,7 +2436,9 @@ export default function Step5VoucherGeneration({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Voucher type:</span>
           <Badge variant="secondary" className="text-xs">
-            {VOUCHER_TYPE_LABELS[resolvedVoucherType]}
+            {SAVINGS_FUNDS_OUT_TYPES.has(transactionType)
+              ? getFundsOutLabel(transactionType)
+              : VOUCHER_TYPE_LABELS[resolvedVoucherType]}
           </Badge>
           {scenarioCode && (
             <>

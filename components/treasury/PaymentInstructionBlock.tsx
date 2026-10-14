@@ -3,6 +3,7 @@
  *
  * Renders a clearly-labelled block showing: Beneficiary Name, Bank Name,
  * Account Number, Account Type, Amount, Transfer Charge, and optional Purpose.
+ * Supports both a single instruction object and an array of entries (multi-beneficiary).
  *
  * Req 36.1 — displayed for all FUNDS_OUT and ROLLOVER_SLIP vouchers where
  *             money leaves the company.
@@ -72,51 +73,35 @@ function Field({
   )
 }
 
-// ─── PaymentInstructionBlock (Req 36.1, 36.5) ─────────────────────────────────
+// ─── Single entry renderer ────────────────────────────────────────────────────
 
-/**
- * Renders a distinct, clearly-labelled "Payment Instruction" section.
- *
- * Used in FundsOutVoucher, SavingsFundsOutVoucher, and RolloverSlipVoucher
- * whenever `payment_instruction` is present on the voucher record.
- *
- * Transfer Charge is rendered as ₦0 (muted) for internal transfers (Req 36.5).
- * Transfer Charge is hidden entirely for CALL_FUNDS_OUT / CMS_FUNDS_OUT — those
- * transactions carry a COT charge (shown separately), not a 0.10% transfer fee.
- */
-export function PaymentInstructionBlock({
-  instruction,
-  transactionType,
+function PaymentInstructionEntry({
+  data,
+  isCotTransaction,
+  index,
+  total,
 }: {
-  instruction: Record<string, unknown>
-  transactionType?: string
+  data: PaymentInstructionData
+  isCotTransaction: boolean
+  index: number
+  total: number
 }) {
-  const data = instruction as PaymentInstructionData
   const beneficiaryName = data.beneficiary_name ?? data.beneficiaryName
-  const bankName = data.bank_name ?? data.bankName
-  const accountNumber = data.account_number ?? data.accountNumber
-  const accountType = data.account_type ?? data.accountType
-  const transferCharge = data.transfer_charge ?? data.transferCharge ?? '0'
-
-  // Resolve transaction type from prop or from the stored instruction data
-  const txType = transactionType ?? data.transaction_type ?? data.transactionType ?? ''
-  const isCotTransaction = txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT'
+  const bankName        = data.bank_name ?? data.bankName
+  const accountNumber   = data.account_number ?? data.accountNumber
+  const accountType     = data.account_type ?? data.accountType
+  const transferCharge  = data.transfer_charge ?? data.transferCharge ?? '0'
   const isInternalTransfer =
     data.is_internal === true || data.is_internal === 'true' ||
     data.isInternal === true || data.isInternal === 'true'
 
   return (
-    <div
-      className="rounded-lg border border-border bg-muted/20 p-4 space-y-3"
-      role="region"
-      aria-label="Payment Instruction"
-    >
-      <div className="flex items-center gap-2">
-        <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <p className="text-xs font-semibold uppercase tracking-wide text-foreground">
-          Payment Instruction
+    <div className={total > 1 ? 'border-t border-border/60 pt-3 first:border-t-0 first:pt-0' : ''}>
+      {total > 1 && (
+        <p className="mb-2 text-[11px] font-semibold text-muted-foreground">
+          Beneficiary {index + 1}
         </p>
-      </div>
+      )}
       <dl className="grid gap-3 sm:grid-cols-2">
         <Field label="Beneficiary Name" value={beneficiaryName ?? '—'} />
         <Field label="Bank Name" value={bankName ?? '—'} />
@@ -126,9 +111,6 @@ export function PaymentInstructionBlock({
           label="Amount"
           value={formatCurrency(typeof data.amount === 'string' ? data.amount : undefined)}
         />
-        {/* Transfer Charge — only relevant for THIRD_PARTY_PAYMENT (0.10% fee).
-            Hidden for CALL/CMS (COT charge shown separately in the voucher above).
-            Shows ₦0 for internal transfers. */}
         {!isCotTransaction && (
           <Field
             label={isInternalTransfer ? 'Transfer Charge' : 'Transfer Charge (0.10%)'}
@@ -151,6 +133,59 @@ export function PaymentInstructionBlock({
           <Field label="Purpose" value={String(data.purpose)} fullWidth />
         )}
       </dl>
+    </div>
+  )
+}
+
+// ─── PaymentInstructionBlock (Req 36.1, 36.5) ─────────────────────────────────
+
+/**
+ * Renders a distinct, clearly-labelled "Payment Instruction" section.
+ * Accepts either a single instruction object or an array of entries.
+ *
+ * Used in FundsOutVoucher, SavingsFundsOutVoucher, and RolloverSlipVoucher
+ * whenever `payment_instruction` is present on the voucher record.
+ *
+ * Transfer Charge is rendered as ₦0 (muted) for internal transfers (Req 36.5).
+ * Transfer Charge is hidden entirely for CALL_FUNDS_OUT / CMS_FUNDS_OUT — those
+ * transactions carry a COT charge (shown separately), not a 0.10% transfer fee.
+ */
+export function PaymentInstructionBlock({
+  instruction,
+  transactionType,
+}: {
+  instruction: Record<string, unknown> | Record<string, unknown>[]
+  transactionType?: string
+}) {
+  // Normalise to array
+  const entries = (Array.isArray(instruction) ? instruction : [instruction]) as PaymentInstructionData[]
+
+  // Resolve transaction type from prop or first entry
+  const firstEntry = entries[0] ?? {}
+  const txType = transactionType ?? firstEntry.transaction_type ?? firstEntry.transactionType ?? ''
+  const isCotTransaction = txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT'
+
+  return (
+    <div
+      className="rounded-lg border border-border bg-muted/20 p-4 space-y-3"
+      role="region"
+      aria-label="Payment Instruction"
+    >
+      <div className="flex items-center gap-2">
+        <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <p className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          {entries.length > 1 ? `Payment Instructions (${entries.length})` : 'Payment Instruction'}
+        </p>
+      </div>
+      {entries.map((entry, idx) => (
+        <PaymentInstructionEntry
+          key={idx}
+          data={entry}
+          isCotTransaction={isCotTransaction}
+          index={idx}
+          total={entries.length}
+        />
+      ))}
     </div>
   )
 }

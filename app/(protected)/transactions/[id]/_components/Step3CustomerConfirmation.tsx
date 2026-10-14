@@ -190,7 +190,7 @@ export default function Step3CustomerConfirmation({
       toast.success("Customer confirmation recorded successfully.");
       // Stay on the workspace page — Next.js revalidatePath in the server action
       // will refresh the server component so the panel switches to read-only mode.
-      router.replace("/dashboard");
+      router.refresh()
     } else {
       const msg = result.error ?? "Submission failed. Please try again.";
       setServerError(msg);

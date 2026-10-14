@@ -44,7 +44,7 @@ export interface VoucherData {
   available_balance: string | null
   transfer_date: string | null
   remarks: string | null
-  payment_instruction: Record<string, unknown> | null
+  payment_instruction: Record<string, unknown> | Record<string, unknown>[] | null
   calculation_snapshot: Record<string, unknown>
   created_at: string
 }

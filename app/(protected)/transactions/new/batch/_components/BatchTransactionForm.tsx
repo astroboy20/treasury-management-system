@@ -112,6 +112,26 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'CMS',              label: 'CMS' },
 ] as const
 
+// ─── Investment label helper ──────────────────────────────────────────────────
+
+/**
+ * Derives a human-readable sub-account qualifier from an external reference.
+ * e.g. "EZBK-R-SV-001" → "Savings", "EZBK-R-CL-001" → "Call", "EZBK-R-CM-001" → "CMS"
+ * Returns null when no qualifier can be determined.
+ */
+function subAccountLabel(extRef: string | null): string | null {
+  if (!extRef) return null
+  const code = extRef.split('-').slice(-2, -1)[0]?.toUpperCase()
+  switch (code) {
+    case 'SV': return 'Savings'
+    case 'CL': return 'Call'
+    case 'CM': return 'CMS'
+    case 'PS': return 'Personal'
+    case 'CP': return 'Commercial Paper'
+    default:   return null
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeEmptyRow(id: string): RowState {
@@ -358,12 +378,18 @@ function RowCard({
                   ? 'No investments found'
                   : 'Select investment…'}
               </option>
-              {row.investments.map((inv) => (
-                <option key={inv.id} value={inv.id}>
-                  {inv.product_type} — {formatCurrency(inv.principal)}
-                  {inv.external_reference ? ` (${inv.external_reference})` : ''}
-                </option>
-              ))}
+              {row.investments.map((inv) => {
+                const sub = subAccountLabel(inv.external_reference)
+                const typeLabel = sub && sub !== inv.product_type
+                  ? `${inv.product_type} (${sub})`
+                  : inv.product_type
+                return (
+                  <option key={inv.id} value={inv.id}>
+                    {typeLabel} — {formatCurrency(inv.principal)}
+                    {inv.external_reference ? ` · ${inv.external_reference}` : ''}
+                  </option>
+                )
+              })}
             </select>
           )}
         </div>

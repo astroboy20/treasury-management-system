@@ -39,8 +39,19 @@ export async function prepareVoucherAction(
   transactionId: string,
   input: VoucherPreparationInput,
 ): Promise<ActionResult<{ voucherId: string; voucherNumber: string }>> {
-  // 1. Validate inputs with Zod
-  const parsed = VoucherPreparationSchema.safeParse(input)
+  // 1. Validate inputs with Zod.
+  //    Strip paymentInstruction BEFORE parsing — for Savings/Call/CMS the client
+  //    sends an array (multi-beneficiary) which FundsOutVoucherSchema rejects
+  //    ("expected object, received array"). We hold it in rawPaymentInstruction
+  //    and reattach it after Zod, bypassing the schema entirely for this field.
+  const rawPaymentInstruction =
+    (input as Record<string, unknown>).paymentInstruction ?? null
+
+  const inputForZod: unknown = rawPaymentInstruction !== null
+    ? { ...(input as Record<string, unknown>), paymentInstruction: undefined }
+    : input
+
+  const parsed = VoucherPreparationSchema.safeParse(inputForZod)
   if (!parsed.success) {
     const firstError = parsed.error.issues[0]?.message ?? 'Invalid input.'
     return { success: false, error: firstError }
@@ -432,11 +443,11 @@ export async function prepareVoucherAction(
   // 8. Build the voucher_data and payment_instruction JSONB payloads
   const { voucherType, ...voucherFields } = parsed.data
 
-  // Extract payment instruction from fields if present
-  const paymentInstruction =
-    'paymentInstruction' in voucherFields
-      ? (voucherFields as Record<string, unknown>).paymentInstruction
-      : null
+  // Use the raw (pre-Zod) payment instruction — this preserves arrays submitted
+  // by SavingsFundsOutForm (multi-beneficiary), which Zod strips because
+  // FundsOutVoucherSchema only accepts a single-object paymentInstruction.
+  // For THIRD_PARTY_PAYMENT the raw value is also a single object — no change.
+  const paymentInstruction = rawPaymentInstruction
 
   // Remove transient client-only fields from the voucher_data payload
   const voucherData: Record<string, unknown> = { ...voucherFields }
@@ -582,6 +593,27 @@ export async function prepareVoucherAction(
     if (isCot && (savingsData as Record<string, unknown>).cotRateTier) {
       voucherData.cot_rate_tier = (savingsData as Record<string, unknown>).cotRateTier
     }
+
+    // 8b-savings-pi. Attach server-computed 0.10% transfer charge to each PI entry.
+    // The client sends entries without a transferCharge — we compute it here so the
+    // persisted voucher always shows the authoritative value (Req 21.2, 36.1).
+    if (paymentInstruction !== null && paymentInstruction !== undefined) {
+      const entries: Record<string, unknown>[] = Array.isArray(paymentInstruction)
+        ? (paymentInstruction as Record<string, unknown>[])
+        : [paymentInstruction as Record<string, unknown>]
+
+      const enriched = entries.map((e) => {
+        const amt = parseFloat(String(e.amount ?? '0'))
+        const charge = isFinite(amt) && amt > 0
+          ? String((Math.round(amt * 0.001 * 1e4) / 1e4).toFixed(4))
+          : '0'
+        return { ...e, transferCharge: charge, transfer_charge: charge }
+      })
+
+      // Write back — preserve single-object shape if only one entry
+      ;(voucherFields as Record<string, unknown>).paymentInstruction =
+        enriched.length === 1 ? enriched[0] : enriched
+    }
   }
 
   // 8c. For THIRD_PARTY_PAYMENT external transfers: validate all 6 PI fields
@@ -626,14 +658,18 @@ export async function prepareVoucherAction(
   }
 
   // 9. Call the PostgreSQL RPC (Req 11.7)
-  // Pass voucherData and paymentInstruction as plain objects — Supabase PostgREST
-  // serialises JS objects correctly into JSONB parameters. Passing JSON.stringify()
-  // results in the value arriving as a text literal, causing JSONB operators like ->
-  // to return null (which is why calculation_snapshot was always saved as {}).
+  // Steps 8c (THIRD_PARTY) and 8b-savings-pi (SAVINGS/CALL/CMS) both write an
+  // enriched PI back into voucherFields.paymentInstruction. Always prefer that
+  // over the original raw value so the persisted charge is authoritative.
+  const piAfter8c =
+    'paymentInstruction' in (voucherFields as Record<string, unknown>)
+      ? (voucherFields as Record<string, unknown>).paymentInstruction
+      : paymentInstruction
+
   const { data, error } = await supabase.rpc('prepare_voucher', {
     p_transaction_id: transactionId,
     p_voucher_data: voucherData,
-    p_payment_instruction: paymentInstruction ?? null,
+    p_payment_instruction: piAfter8c ?? null,
   })
 
   if (error) {

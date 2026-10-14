@@ -98,6 +98,26 @@ const INTERNAL_TRANSFER_TYPES: TransactionType[] = ['INTERNAL_TRANSFER']
 /** Transaction types that require external payment beneficiary fields (Req 7.7) */
 const EXTERNAL_PAYMENT_TYPES: TransactionType[] = ['THIRD_PARTY_PAYMENT']
 
+// ─── Investment label helper ──────────────────────────────────────────────────
+
+/**
+ * Derives a human-readable sub-account qualifier from an external reference.
+ * e.g. "EZBK-R-SV-001" → "Savings", "EZBK-R-CL-001" → "Call", "EZBK-R-CM-001" → "CMS"
+ * Returns null when no qualifier can be determined.
+ */
+function subAccountLabel(extRef: string | null): string | null {
+  if (!extRef) return null
+  const code = extRef.split('-').slice(-2, -1)[0]?.toUpperCase()
+  switch (code) {
+    case 'SV': return 'Savings'
+    case 'CL': return 'Call'
+    case 'CM': return 'CMS'
+    case 'PS': return 'Personal'
+    case 'CP': return 'Commercial Paper'
+    default:   return null
+  }
+}
+
 // ─── Field helpers ────────────────────────────────────────────────────────────
 
 function FieldError({ message }: { message?: string }) {
@@ -649,12 +669,18 @@ export default function NewTransactionForm({ customers }: Props) {
                       ? 'No investments found'
                       : 'Select investment (optional)'}
                   </option>
-                  {investments.map((inv) => (
-                    <option key={inv.id} value={inv.id}>
-                      {inv.product_type} — ₦{Number(inv.principal).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
-                      {inv.external_reference ? ` (${inv.external_reference})` : ''}
-                    </option>
-                  ))}
+                  {investments.map((inv) => {
+                    const sub = subAccountLabel(inv.external_reference)
+                    const typeLabel = sub && sub !== inv.product_type
+                      ? `${inv.product_type} (${sub})`
+                      : inv.product_type
+                    return (
+                      <option key={inv.id} value={inv.id}>
+                        {typeLabel} — ₦{Number(inv.principal).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                        {inv.external_reference ? ` · ${inv.external_reference}` : ''}
+                      </option>
+                    )
+                  })}
                 </select>
               )}
             </div>
@@ -884,10 +910,10 @@ export default function NewTransactionForm({ customers }: Props) {
               <p className="text-sm font-semibold text-blue-700">
                 Partial Principal Rollover — Calculation Preview
               </p>
-              <p className="text-xs text-blue-600/70">
+              {/* <p className="text-xs text-blue-600/70">
                 Authoritative calculations run server-side using PostgreSQL NUMERIC arithmetic.
                 Values shown here are estimates for review only.
-              </p>
+              </p> */}
               <dl className="grid gap-3 sm:grid-cols-3 text-sm">
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Original Principal</dt>
