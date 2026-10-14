@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Layers } from 'lucide-react'
 
 import { getAuthenticatedUser, resolveUserRole } from '@/lib/services/auth.service'
 import { createClient } from '@/lib/supabase/server'
@@ -24,20 +24,16 @@ async function fetchCustomers() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function NewTransactionPage() {
-  // Auth check — this is a protected route (layout also checks, but we check
-  // here too so we can enforce TREASURY_OFFICER before rendering)
   const user = await getAuthenticatedUser()
   if (!user) redirect('/auth/login')
 
   const role = await resolveUserRole(user.id)
   if (!role) redirect('/auth/login')
 
-  // Only Treasury Officers (and Admins) can reach this page
   if (role !== 'TREASURY_OFFICER' && role !== 'ADMIN') {
     redirect('/transactions')
   }
 
-  // Prefetch customers server-side so the combobox has instant data
   const customers = await fetchCustomers()
 
   return (
@@ -63,8 +59,25 @@ export default async function NewTransactionPage() {
         </p>
       </div>
 
+      {/* Single / Batch mode toggle */}
+      <div className="mt-6 flex items-center gap-2 rounded-xl border border-border bg-muted/30 p-1">
+        <span
+          aria-current="page"
+          className="flex-1 rounded-lg bg-background px-4 py-2 text-center text-sm font-medium text-foreground shadow-sm"
+        >
+          Single instruction
+        </span>
+        <Link
+          href="/transactions/new/batch"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-center text-sm font-medium text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-background [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
+        >
+          <Layers className="size-3.5" aria-hidden />
+          Batch (up to 10)
+        </Link>
+      </div>
+
       {/* Form */}
-      <div className="mt-8">
+      <div className="mt-6">
         <NewTransactionForm customers={customers} />
       </div>
     </div>

@@ -110,9 +110,12 @@ const isoDateString = (fieldName: string) =>
     .regex(/^\d{4}-\d{2}-\d{2}$/, `${fieldName} must be in YYYY-MM-DD format.`)
 
 export const InvestmentVerificationSchema = z.object({
-  principal: positiveNumericString('Principal'),
+  // principal and interestRate allow zero — Call/CMS accounts are balance-based
+  // products with no principal/rate split (Req 38.2). Fixed deposits will always
+  // have positive values; the field is not blank-rejected here.
+  principal: numericString('Principal'),
   accruedInterest: numericString('Accrued interest'),
-  interestRate: positiveNumericString('Interest rate'),
+  interestRate: numericString('Interest rate'),
   effectiveDate: isoDateString('Effective date'),
 
   // maturityDate is optional — CALL accounts may have no maturity date

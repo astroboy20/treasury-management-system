@@ -32,6 +32,11 @@ export interface PaymentInstructionData {
   transfer_charge?: string
   transferCharge?: string
   purpose?: string
+  /** Transaction type — threaded through so the block can suppress irrelevant fields */
+  transaction_type?: string
+  transactionType?: string
+  is_internal?: boolean | string
+  isInternal?: boolean | string
 }
 
 // ─── Local helpers ────────────────────────────────────────────────────────────
@@ -76,11 +81,15 @@ function Field({
  * whenever `payment_instruction` is present on the voucher record.
  *
  * Transfer Charge is rendered as ₦0 (muted) for internal transfers (Req 36.5).
+ * Transfer Charge is hidden entirely for CALL_FUNDS_OUT / CMS_FUNDS_OUT — those
+ * transactions carry a COT charge (shown separately), not a 0.10% transfer fee.
  */
 export function PaymentInstructionBlock({
   instruction,
+  transactionType,
 }: {
   instruction: Record<string, unknown>
+  transactionType?: string
 }) {
   const data = instruction as PaymentInstructionData
   const beneficiaryName = data.beneficiary_name ?? data.beneficiaryName
@@ -88,6 +97,13 @@ export function PaymentInstructionBlock({
   const accountNumber = data.account_number ?? data.accountNumber
   const accountType = data.account_type ?? data.accountType
   const transferCharge = data.transfer_charge ?? data.transferCharge ?? '0'
+
+  // Resolve transaction type from prop or from the stored instruction data
+  const txType = transactionType ?? data.transaction_type ?? data.transactionType ?? ''
+  const isCotTransaction = txType === 'CALL_FUNDS_OUT' || txType === 'CMS_FUNDS_OUT'
+  const isInternalTransfer =
+    data.is_internal === true || data.is_internal === 'true' ||
+    data.isInternal === true || data.isInternal === 'true'
 
   return (
     <div
@@ -110,20 +126,27 @@ export function PaymentInstructionBlock({
           label="Amount"
           value={formatCurrency(typeof data.amount === 'string' ? data.amount : undefined)}
         />
-        <Field
-          label="Transfer Charge"
-          value={
-            <span
-              className={
-                parseFloat(String(transferCharge)) === 0
-                  ? 'text-muted-foreground'
-                  : 'font-medium text-foreground'
-              }
-            >
-              {formatCurrency(String(transferCharge))}
-            </span>
-          }
-        />
+        {/* Transfer Charge — only relevant for THIRD_PARTY_PAYMENT (0.10% fee).
+            Hidden for CALL/CMS (COT charge shown separately in the voucher above).
+            Shows ₦0 for internal transfers. */}
+        {!isCotTransaction && (
+          <Field
+            label={isInternalTransfer ? 'Transfer Charge' : 'Transfer Charge (0.10%)'}
+            value={
+              <span
+                className={
+                  isInternalTransfer || parseFloat(String(transferCharge)) === 0
+                    ? 'text-muted-foreground'
+                    : 'font-medium text-foreground'
+                }
+              >
+                {isInternalTransfer
+                  ? '₦0.00 (internal — no charge)'
+                  : formatCurrency(String(transferCharge))}
+              </span>
+            }
+          />
+        )}
         {data.purpose && (
           <Field label="Purpose" value={String(data.purpose)} fullWidth />
         )}

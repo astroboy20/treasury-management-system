@@ -161,8 +161,8 @@ async function teardownTransaction(txId: string) {
 
 describe('A. Approval idempotency — pure logic layer (Req 12.9)', () => {
 
-  describe('ApprovalSchema covers all five stages exactly once', () => {
-    const allStages = ['TREASURY', 'HEAD_TREASURY', 'MIS', 'AUDIT', 'MD']
+  describe('ApprovalSchema covers all four stages exactly once', () => {
+    const allStages = ['HEAD_TREASURY', 'MIS', 'AUDIT', 'MD']
 
     it('each stage is a valid enum value accepted by ApprovalSchema', () => {
       for (const stage of allStages) {
@@ -176,7 +176,12 @@ describe('A. Approval idempotency — pure logic layer (Req 12.9)', () => {
       expect(result.success).toBe(false)
     })
 
-    it('STAGE_TO_ROLE maps all five approval stages to a role', () => {
+    it('TREASURY stage is rejected by ApprovalSchema (removed from chain)', () => {
+      const result = ApprovalSchema.safeParse({ stage: 'TREASURY', decision: 'APPROVE' })
+      expect(result.success).toBe(false)
+    })
+
+    it('STAGE_TO_ROLE maps all four approval stages to a role', () => {
       for (const stage of allStages) {
         expect(STAGE_TO_ROLE[stage]).toBeDefined()
         expect(typeof STAGE_TO_ROLE[stage]).toBe('string')
@@ -192,12 +197,8 @@ describe('A. Approval idempotency — pure logic layer (Req 12.9)', () => {
   })
 
   describe('getRequiredStage correctly identifies the active stage per status', () => {
-    it('VOUCHER_PREPARED → TREASURY stage', () => {
-      expect(getRequiredStage('VOUCHER_PREPARED')).toBe('TREASURY')
-    })
-
-    it('TREASURY_APPROVED → HEAD_TREASURY stage', () => {
-      expect(getRequiredStage('TREASURY_APPROVED')).toBe('HEAD_TREASURY')
+    it('VOUCHER_PREPARED → HEAD_TREASURY stage (first approver after Treasury prepares voucher)', () => {
+      expect(getRequiredStage('VOUCHER_PREPARED')).toBe('HEAD_TREASURY')
     })
 
     it('HEAD_TREASURY_APPROVED → MIS stage', () => {
@@ -229,29 +230,31 @@ describe('A. Approval idempotency — pure logic layer (Req 12.9)', () => {
 
     it('TREASURY_OFFICER (non-creator) can act at VOUCHER_PREPARED', () => {
       const tx = { id: TX_ID, status: 'VOUCHER_PREPARED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
-      expect(canActorAct('TREASURY_OFFICER', tx, APPROVER_ID)).toBe(true)
+      expect(canActorAct('TREASURY_OFFICER', tx, APPROVER_ID)).toBe(false) // VOUCHER_PREPARED is now HEAD_TREASURY's stage
     })
 
-    it('TREASURY_OFFICER cannot act at TREASURY_APPROVED (stage already advanced)', () => {
-      // After the first approval the status moves to TREASURY_APPROVED.
-      // canActorAct for TREASURY_OFFICER requires VOUCHER_PREPARED status —
-      // so the same user cannot "approve again" at the new status.
-      const tx = { id: TX_ID, status: 'TREASURY_APPROVED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
-      expect(canActorAct('TREASURY_OFFICER', tx, APPROVER_ID)).toBe(false)
-    })
-
-    it('HEAD_TREASURY can act at TREASURY_APPROVED (next stage)', () => {
-      const tx = { id: TX_ID, status: 'TREASURY_APPROVED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
+    it('HEAD_TREASURY can act at VOUCHER_PREPARED (first approval stage)', () => {
+      const tx = { id: TX_ID, status: 'VOUCHER_PREPARED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
       expect(canActorAct('HEAD_TREASURY', tx, APPROVER_ID)).toBe(true)
     })
 
-    it('HEAD_TREASURY cannot act at VOUCHER_PREPARED (not their stage)', () => {
-      const tx = { id: TX_ID, status: 'VOUCHER_PREPARED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
+    it('HEAD_TREASURY cannot act at HEAD_TREASURY_APPROVED (stage already advanced)', () => {
+      const tx = { id: TX_ID, status: 'HEAD_TREASURY_APPROVED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
       expect(canActorAct('HEAD_TREASURY', tx, APPROVER_ID)).toBe(false)
     })
 
-    it('MIS cannot act at TREASURY_APPROVED (wrong stage)', () => {
-      const tx = { id: TX_ID, status: 'TREASURY_APPROVED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
+    it('MIS can act at HEAD_TREASURY_APPROVED (next stage)', () => {
+      const tx = { id: TX_ID, status: 'HEAD_TREASURY_APPROVED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
+      expect(canActorAct('MIS', tx, APPROVER_ID)).toBe(true)
+    })
+
+    it('HEAD_TREASURY cannot act at VOUCHER_PREPARED when they are the maker', () => {
+      const tx = { id: TX_ID, status: 'VOUCHER_PREPARED', created_by: APPROVER_ID, transaction_type: 'ROLLOVER' }
+      expect(canActorAct('HEAD_TREASURY', tx, APPROVER_ID)).toBe(false)
+    })
+
+    it('MIS cannot act at VOUCHER_PREPARED (wrong stage)', () => {
+      const tx = { id: TX_ID, status: 'VOUCHER_PREPARED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
       expect(canActorAct('MIS', tx, APPROVER_ID)).toBe(false)
     })
 
@@ -284,25 +287,25 @@ describe('A. Approval idempotency — pure logic layer (Req 12.9)', () => {
   describe('Maker-checker prevents the transaction creator from approving (Req 5.4)', () => {
     it('transaction creator (MAKER_ID) cannot approve at VOUCHER_PREPARED', () => {
       const tx = { id: TX_ID, status: 'VOUCHER_PREPARED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
-      // Passing MAKER_ID as the actorId — same as creator
-      expect(canActorAct('TREASURY_OFFICER', tx, MAKER_ID)).toBe(false)
+      // Passing MAKER_ID as the actorId — same as creator; HEAD_TREASURY role would normally act here
+      expect(canActorAct('HEAD_TREASURY', tx, MAKER_ID)).toBe(false)
     })
 
-    it('a different TREASURY_OFFICER (APPROVER_ID) can approve at VOUCHER_PREPARED', () => {
+    it('a different HEAD_TREASURY (APPROVER_ID) can approve at VOUCHER_PREPARED', () => {
       const tx = { id: TX_ID, status: 'VOUCHER_PREPARED', created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
-      expect(canActorAct('TREASURY_OFFICER', tx, APPROVER_ID)).toBe(true)
+      expect(canActorAct('HEAD_TREASURY', tx, APPROVER_ID)).toBe(true)
     })
 
-    it('maker-checker blocks the creator at all five approval stages', () => {
+    it('maker-checker blocks the creator at all four approval stages', () => {
       const approvalStatuses = [
         'VOUCHER_PREPARED',
-        'TREASURY_APPROVED',
         'HEAD_TREASURY_APPROVED',
         'MIS_APPROVED',
         'AUDIT_APPROVED',
       ]
       for (const status of approvalStatuses) {
         const tx = { id: TX_ID, status, created_by: MAKER_ID, transaction_type: 'ROLLOVER' }
+        // Treasury Officer (the maker role) should be blocked at all these stages
         expect(canActorAct('TREASURY_OFFICER', tx, MAKER_ID)).toBe(false)
       }
     })
@@ -310,11 +313,11 @@ describe('A. Approval idempotency — pure logic layer (Req 12.9)', () => {
 
   describe('Approval comments requirement prevents silent double-submission (Req 12.6, 12.7)', () => {
     it('RETURN decision requires a non-empty comment — prevents ambiguous re-submission', () => {
-      const noComment = ApprovalSchema.safeParse({ stage: 'TREASURY', decision: 'RETURN' })
+      const noComment = ApprovalSchema.safeParse({ stage: 'HEAD_TREASURY', decision: 'RETURN' })
       expect(noComment.success).toBe(false)
 
       const withComment = ApprovalSchema.safeParse({
-        stage: 'TREASURY',
+        stage: 'HEAD_TREASURY',
         decision: 'RETURN',
         comments: 'Voucher amount does not match instruction',
       })
@@ -355,7 +358,7 @@ describe('B. Execution idempotency — pure logic layer (Req 14.6, 33.3)', () =>
     it('OPERATIONS cannot act at any pre-MD_APPROVED status', () => {
       const statuses = [
         'INSTRUCTION_RECEIVED', 'SIGNATURE_VERIFIED', 'CUSTOMER_CONFIRMED',
-        'INVESTMENT_VERIFIED', 'VOUCHER_PREPARED', 'TREASURY_APPROVED',
+        'INVESTMENT_VERIFIED', 'VOUCHER_PREPARED',
         'HEAD_TREASURY_APPROVED', 'MIS_APPROVED', 'AUDIT_APPROVED',
       ]
       for (const status of statuses) {
@@ -410,12 +413,12 @@ describe('B. Execution idempotency — pure logic layer (Req 14.6, 33.3)', () =>
     //   3. The UI disables the form once an execution record exists.
     // These are design contracts tested at the DB level in Section C below.
 
-    it('approvals unique constraint covers (transaction_id, stage) — all five stages', () => {
+    it('approvals unique constraint covers (transaction_id, stage) — all four stages', () => {
       // Each stage can only have one approval row per transaction.
-      // The five stages must all be distinct so no stage is accidentally duplicated.
-      const stages = ['TREASURY', 'HEAD_TREASURY', 'MIS', 'AUDIT', 'MD']
+      // The four stages must all be distinct so no stage is accidentally duplicated.
+      const stages = ['HEAD_TREASURY', 'MIS', 'AUDIT', 'MD']
       const uniqueStages = new Set(stages)
-      expect(uniqueStages.size).toBe(5)
+      expect(uniqueStages.size).toBe(4)
     })
 
     it('APPROVE decision has no required comment — a blank re-submission would be schema-valid', () => {
@@ -449,36 +452,36 @@ describe('C. Approval idempotency — live DB (unique constraint on approvals) (
     }
   })
 
-  describe('Double-submit TREASURY approval for the same transaction', () => {
+  describe('Double-submit HEAD_TREASURY approval for the same transaction', () => {
     let txId: string
     let approverProfileId: string
 
     beforeAll(async () => {
-      // Place the transaction at VOUCHER_PREPARED — Treasury approval is next
+      // Place the transaction at VOUCHER_PREPARED — Head Treasury approval is next
       const { txId: id } = await seedTransaction({
         customerId:     NEG.customer001,
         investmentId:   NEG.invest001,
         status:         'VOUCHER_PREPARED',
-        createdByEmail: USERS.headTreasury, // creator is HEAD_TREASURY so TREASURY_OFFICER can approve
+        createdByEmail: USERS.treasury, // creator is TREASURY_OFFICER so HEAD_TREASURY can approve
       })
       txId = id
 
-      // Resolve the treasury user's profile id for verification
+      // Resolve the head treasury user's profile id for verification
       const admin = adminClient()
       const { data: profile } = await admin
         .from('profiles')
         .select('id')
-        .eq('email', USERS.treasury)
+        .eq('email', USERS.headTreasury)
         .single()
       approverProfileId = profile?.id ?? ''
     })
 
-    it('first TREASURY approval succeeds and status advances to TREASURY_APPROVED', async () => {
-      const client = await clientAs(USERS.treasury)
+    it('first HEAD_TREASURY approval succeeds and status advances to HEAD_TREASURY_APPROVED', async () => {
+      const client = await clientAs(USERS.headTreasury)
 
       const { data, error } = await client.rpc('approve_transaction', {
         p_transaction_id: txId,
-        p_stage:          'TREASURY',
+        p_stage:          'HEAD_TREASURY',
         p_decision:       'APPROVE',
         p_comments:       null,
       })
@@ -493,13 +496,13 @@ describe('C. Approval idempotency — live DB (unique constraint on approvals) (
         .from('approvals')
         .select('id, stage, decision')
         .eq('transaction_id', txId)
-        .eq('stage', 'TREASURY')
+        .eq('stage', 'HEAD_TREASURY')
 
       expect(data).toHaveLength(1)
       expect(data![0].decision).toBe('APPROVE')
     })
 
-    it('transaction status is TREASURY_APPROVED after the first approval', async () => {
+    it('transaction status is HEAD_TREASURY_APPROVED after the first approval', async () => {
       const admin = adminClient()
       const { data } = await admin
         .from('treasury_transactions')
@@ -507,22 +510,20 @@ describe('C. Approval idempotency — live DB (unique constraint on approvals) (
         .eq('id', txId)
         .single()
 
-      expect(data?.status).toBe('TREASURY_APPROVED')
+      expect(data?.status).toBe('HEAD_TREASURY_APPROVED')
     })
 
-    it('second TREASURY approval for the same stage returns an error (Req 12.9)', async () => {
-      const client = await clientAs(USERS.treasury)
+    it('second HEAD_TREASURY approval for the same stage returns an error (Req 12.9)', async () => {
+      const client = await clientAs(USERS.headTreasury)
 
       const { data, error } = await client.rpc('approve_transaction', {
         p_transaction_id: txId,
-        p_stage:          'TREASURY',
+        p_stage:          'HEAD_TREASURY',
         p_decision:       'APPROVE',
         p_comments:       null,
       })
 
-      // The second call must fail — either due to the unique constraint
-      // (duplicate_key / 23505) or the INVALID_STATE check in the RPC
-      // (status is now TREASURY_APPROVED, not VOUCHER_PREPARED)
+      // The second call must fail — status is now HEAD_TREASURY_APPROVED, not VOUCHER_PREPARED
       expect(error).not.toBeNull()
       expect(data).toBeNull()
     })
@@ -533,13 +534,13 @@ describe('C. Approval idempotency — live DB (unique constraint on approvals) (
         .from('approvals')
         .select('id')
         .eq('transaction_id', txId)
-        .eq('stage', 'TREASURY')
+        .eq('stage', 'HEAD_TREASURY')
 
       // The unique constraint must have prevented a second row
       expect(data).toHaveLength(1)
     })
 
-    it('transaction status is still TREASURY_APPROVED — not rolled back by second call', async () => {
+    it('transaction status is still HEAD_TREASURY_APPROVED — not rolled back by second call', async () => {
       const admin = adminClient()
       const { data } = await admin
         .from('treasury_transactions')
@@ -548,7 +549,7 @@ describe('C. Approval idempotency — live DB (unique constraint on approvals) (
         .single()
 
       // The first approval's effect must be preserved
-      expect(data?.status).toBe('TREASURY_APPROVED')
+      expect(data?.status).toBe('HEAD_TREASURY_APPROVED')
     })
 
     afterAll(async () => { await teardownTransaction(txId) })
@@ -562,26 +563,26 @@ describe('C. Approval idempotency — live DB (unique constraint on approvals) (
         customerId:     NEG.customer001,
         investmentId:   NEG.invest001,
         status:         'VOUCHER_PREPARED',
-        createdByEmail: USERS.headTreasury,
+        createdByEmail: USERS.treasury,
       })
       txId = id
 
-      // First: TREASURY OFFICER approves
-      const client = await clientAs(USERS.treasury)
+      // First: HEAD_TREASURY approves
+      const client = await clientAs(USERS.headTreasury)
       await client.rpc('approve_transaction', {
         p_transaction_id: txId,
-        p_stage:          'TREASURY',
+        p_stage:          'HEAD_TREASURY',
         p_decision:       'APPROVE',
         p_comments:       null,
       })
     })
 
-    it('attempting to RETURN the same TREASURY stage after APPROVE is rejected', async () => {
-      const client = await clientAs(USERS.treasury)
+    it('attempting to RETURN the same HEAD_TREASURY stage after APPROVE is rejected', async () => {
+      const client = await clientAs(USERS.headTreasury)
 
       const { data, error } = await client.rpc('approve_transaction', {
         p_transaction_id: txId,
-        p_stage:          'TREASURY',
+        p_stage:          'HEAD_TREASURY',
         p_decision:       'RETURN',
         p_comments:       'Trying to return after already approving',
       })
@@ -596,7 +597,7 @@ describe('C. Approval idempotency — live DB (unique constraint on approvals) (
         .from('approvals')
         .select('id, decision')
         .eq('transaction_id', txId)
-        .eq('stage', 'TREASURY')
+        .eq('stage', 'HEAD_TREASURY')
 
       expect(data).toHaveLength(1)
       expect(data![0].decision).toBe('APPROVE')

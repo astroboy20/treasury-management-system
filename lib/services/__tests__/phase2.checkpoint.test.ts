@@ -550,14 +550,14 @@ describe('VoucherPreparationSchema — Step 5 (Req 11.1–11.9)', () => {
 describe('ApprovalSchema — Step 6 (Req 12.1–12.9)', () => {
   it('accepts APPROVE with no comments', () => {
     expect(
-      ApprovalSchema.safeParse({ stage: 'TREASURY', decision: 'APPROVE' }).success,
+      ApprovalSchema.safeParse({ stage: 'HEAD_TREASURY', decision: 'APPROVE' }).success,
     ).toBe(true)
   })
 
   it('accepts RETURN with a non-empty comment (Req 12.6)', () => {
     expect(
       ApprovalSchema.safeParse({
-        stage: 'TREASURY',
+        stage: 'HEAD_TREASURY',
         decision: 'RETURN',
         comments: 'Please check the beneficiary details.',
       }).success,
@@ -565,7 +565,7 @@ describe('ApprovalSchema — Step 6 (Req 12.1–12.9)', () => {
   })
 
   it('rejects RETURN without comments (Req 12.6)', () => {
-    const result = ApprovalSchema.safeParse({ stage: 'TREASURY', decision: 'RETURN' })
+    const result = ApprovalSchema.safeParse({ stage: 'HEAD_TREASURY', decision: 'RETURN' })
     expect(result.success).toBe(false)
     if (!result.success) {
       const commentError = result.error.issues.find((i) => i.path.includes('comments'))
@@ -575,7 +575,7 @@ describe('ApprovalSchema — Step 6 (Req 12.1–12.9)', () => {
 
   it('rejects RETURN with an empty-string comment (Req 12.6)', () => {
     const result = ApprovalSchema.safeParse({
-      stage: 'TREASURY',
+      stage: 'HEAD_TREASURY',
       decision: 'RETURN',
       comments: '   ',
     })
@@ -601,13 +601,19 @@ describe('ApprovalSchema — Step 6 (Req 12.1–12.9)', () => {
     ).toBe(true)
   })
 
-  it('accepts all five valid stages', () => {
-    const stages = ['TREASURY', 'HEAD_TREASURY', 'MIS', 'AUDIT', 'MD'] as const
+  it('accepts all four valid stages (TREASURY removed from chain)', () => {
+    const stages = ['HEAD_TREASURY', 'MIS', 'AUDIT', 'MD'] as const
     for (const stage of stages) {
       expect(
         ApprovalSchema.safeParse({ stage, decision: 'APPROVE' }).success,
       ).toBe(true)
     }
+  })
+
+  it('rejects TREASURY stage (no longer part of the approval chain)', () => {
+    expect(
+      ApprovalSchema.safeParse({ stage: 'TREASURY', decision: 'APPROVE' }).success,
+    ).toBe(false)
   })
 
   it('rejects an invalid stage', () => {
@@ -618,7 +624,7 @@ describe('ApprovalSchema — Step 6 (Req 12.1–12.9)', () => {
 
   it('rejects an invalid decision', () => {
     expect(
-      ApprovalSchema.safeParse({ stage: 'TREASURY', decision: 'ABSTAIN' }).success,
+      ApprovalSchema.safeParse({ stage: 'HEAD_TREASURY', decision: 'ABSTAIN' }).success,
     ).toBe(false)
   })
 })
@@ -626,77 +632,53 @@ describe('ApprovalSchema — Step 6 (Req 12.1–12.9)', () => {
 // ─── 7. Workflow Service — buildStepsMeta() ───────────────────────────────────
 
 describe('buildStepsMeta() — StepProgressTracker state machine (Req 16.1, 16.2)', () => {
-  it('Step 1 is always completed once a transaction exists', () => {
+  it('Step 1 (Instruction & Verification) is active when a transaction exists', () => {
     const steps = buildStepsMeta('INSTRUCTION_RECEIVED')
+    expect(steps[0].state).toBe('active')
+  })
+
+  it('Step 1 is completed once VOUCHER_PREPARED is reached', () => {
+    const steps = buildStepsMeta('VOUCHER_PREPARED')
     expect(steps[0].state).toBe('completed')
   })
 
-  it('Step 2 is active at INSTRUCTION_RECEIVED', () => {
+  it('Step 2 (Approval Chain) is locked before VOUCHER_PREPARED', () => {
     const steps = buildStepsMeta('INSTRUCTION_RECEIVED')
+    expect(steps[1].state).toBe('locked')
+  })
+
+  it('Step 2 is locked when signature is FAILED (Req 8.3)', () => {
+    const steps = buildStepsMeta('INSTRUCTION_RECEIVED', 'FAILED')
+    expect(steps[1].state).toBe('locked')
+    expect(steps[1].lockedReason).toBeDefined()
+  })
+
+  it('Step 2 is active at VOUCHER_PREPARED', () => {
+    const steps = buildStepsMeta('VOUCHER_PREPARED')
     expect(steps[1].state).toBe('active')
   })
 
-  it('Step 2 is completed after SIGNATURE_VERIFIED', () => {
-    const steps = buildStepsMeta('SIGNATURE_VERIFIED')
-    expect(steps[1].state).toBe('completed')
-  })
-
-  it('Steps 3–6 are locked when signature is FAILED (Req 8.3)', () => {
-    const steps = buildStepsMeta('INSTRUCTION_RECEIVED', 'FAILED')
-    for (const step of steps.slice(2)) {
-      expect(step.state).toBe('locked')
-    }
-  })
-
-  it('Step 3 is active at SIGNATURE_VERIFIED with passing signature', () => {
-    const steps = buildStepsMeta('SIGNATURE_VERIFIED', null)
-    expect(steps[2].state).toBe('active')
-  })
-
-  it('Step 3 is completed after CUSTOMER_CONFIRMED', () => {
-    const steps = buildStepsMeta('CUSTOMER_CONFIRMED')
-    expect(steps[2].state).toBe('completed')
-  })
-
-  it('Step 4 is active at CUSTOMER_CONFIRMED', () => {
-    const steps = buildStepsMeta('CUSTOMER_CONFIRMED')
-    expect(steps[3].state).toBe('active')
-  })
-
-  it('Step 5 is active at INVESTMENT_VERIFIED', () => {
-    const steps = buildStepsMeta('INVESTMENT_VERIFIED')
-    expect(steps[4].state).toBe('active')
-  })
-
-  it('Step 6 is active at VOUCHER_PREPARED', () => {
-    const steps = buildStepsMeta('VOUCHER_PREPARED')
-    expect(steps[5].state).toBe('active')
-  })
-
-  it('Step 6 is active at every approval stage', () => {
+  it('Step 2 is active at every approval stage', () => {
     const approvalStatuses = [
       'VOUCHER_PREPARED',
-      'TREASURY_APPROVED',
       'HEAD_TREASURY_APPROVED',
       'MIS_APPROVED',
       'AUDIT_APPROVED',
     ]
     for (const status of approvalStatuses) {
       const steps = buildStepsMeta(status)
-      expect(steps[5].state).toBe('active')
+      expect(steps[1].state).toBe('active')
     }
   })
 
-  it('Step 6 is still active at MD_APPROVED (operations not yet executed)', () => {
-    // The approval chain panel remains active until OPERATIONS_COMPLETED —
-    // MD_APPROVED means the chain passed but ops execution is still pending.
+  it('Step 2 is active at MD_APPROVED (operations not yet executed)', () => {
     const steps = buildStepsMeta('MD_APPROVED')
-    expect(steps[5].state).toBe('active')
+    expect(steps[1].state).toBe('active')
   })
 
-  it('Step 6 is completed after OPERATIONS_COMPLETED', () => {
+  it('Step 2 is completed after OPERATIONS_COMPLETED', () => {
     const steps = buildStepsMeta('OPERATIONS_COMPLETED')
-    expect(steps[5].state).toBe('completed')
+    expect(steps[1].state).toBe('completed')
   })
 
   it('all steps are completed at COMPLETED status', () => {
@@ -710,20 +692,25 @@ describe('buildStepsMeta() — StepProgressTracker state machine (Req 16.1, 16.2
 // ─── 8. Workflow Service — canActorAct() + maker-checker ─────────────────────
 
 describe('canActorAct() — role enforcement + maker-checker (Req 5.2, 5.4)', () => {
-  // TREASURY_OFFICER who did NOT create the tx
-  it('TREASURY_OFFICER (non-maker) can act at VOUCHER_PREPARED (Treasury approval)', () => {
+  it('TREASURY_OFFICER (non-maker) cannot act at VOUCHER_PREPARED (Head Treasury approves first)', () => {
     expect(
       canActorAct('TREASURY_OFFICER', { ...baseTx, status: 'VOUCHER_PREPARED' }, ACTOR_ID_B),
-    ).toBe(true)
-  })
-
-  it('TREASURY_OFFICER (maker) cannot approve their own transaction (Req 5.4)', () => {
-    expect(
-      canActorAct('TREASURY_OFFICER', { ...baseTx, status: 'VOUCHER_PREPARED' }, ACTOR_ID_A),
     ).toBe(false)
   })
 
-  it('TREASURY_OFFICER can create/verify at non-approval statuses (not maker-checker blocked)', () => {
+  it('HEAD_TREASURY (non-maker) can act at VOUCHER_PREPARED (first approval stage)', () => {
+    expect(
+      canActorAct('HEAD_TREASURY', { ...baseTx, status: 'VOUCHER_PREPARED' }, ACTOR_ID_B),
+    ).toBe(true)
+  })
+
+  it('HEAD_TREASURY (maker) cannot approve their own transaction (Req 5.4)', () => {
+    expect(
+      canActorAct('HEAD_TREASURY', { ...baseTx, status: 'VOUCHER_PREPARED' }, ACTOR_ID_A),
+    ).toBe(false)
+  })
+
+  it('TREASURY_OFFICER (maker) can still create/verify at non-approval statuses (not maker-checker blocked)', () => {
     expect(
       canActorAct('TREASURY_OFFICER', { ...baseTx, status: 'INSTRUCTION_RECEIVED' }, ACTOR_ID_A),
     ).toBe(true)
@@ -741,12 +728,12 @@ describe('canActorAct() — role enforcement + maker-checker (Req 5.2, 5.4)', ()
     ).toBe(false)
   })
 
-  it('HEAD_TREASURY can act only at TREASURY_APPROVED', () => {
-    expect(
-      canActorAct('HEAD_TREASURY', { ...baseTx, status: 'TREASURY_APPROVED' }, ACTOR_ID_B),
-    ).toBe(true)
+  it('HEAD_TREASURY can act only at VOUCHER_PREPARED', () => {
     expect(
       canActorAct('HEAD_TREASURY', { ...baseTx, status: 'VOUCHER_PREPARED' }, ACTOR_ID_B),
+    ).toBe(true)
+    expect(
+      canActorAct('HEAD_TREASURY', { ...baseTx, status: 'HEAD_TREASURY_APPROVED' }, ACTOR_ID_B),
     ).toBe(false)
   })
 
@@ -755,7 +742,7 @@ describe('canActorAct() — role enforcement + maker-checker (Req 5.2, 5.4)', ()
       canActorAct('MIS', { ...baseTx, status: 'HEAD_TREASURY_APPROVED' }, ACTOR_ID_B),
     ).toBe(true)
     expect(
-      canActorAct('MIS', { ...baseTx, status: 'TREASURY_APPROVED' }, ACTOR_ID_B),
+      canActorAct('MIS', { ...baseTx, status: 'VOUCHER_PREPARED' }, ACTOR_ID_B),
     ).toBe(false)
   })
 
@@ -799,12 +786,8 @@ describe('canActorAct() — role enforcement + maker-checker (Req 5.2, 5.4)', ()
 // ─── 9. Workflow Service — getRequiredStage() ─────────────────────────────────
 
 describe('getRequiredStage() — status → approval stage mapping', () => {
-  it('maps VOUCHER_PREPARED → TREASURY', () => {
-    expect(getRequiredStage('VOUCHER_PREPARED')).toBe('TREASURY')
-  })
-
-  it('maps TREASURY_APPROVED → HEAD_TREASURY', () => {
-    expect(getRequiredStage('TREASURY_APPROVED')).toBe('HEAD_TREASURY')
+  it('maps VOUCHER_PREPARED → HEAD_TREASURY (first stage after Treasury prepares voucher)', () => {
+    expect(getRequiredStage('VOUCHER_PREPARED')).toBe('HEAD_TREASURY')
   })
 
   it('maps HEAD_TREASURY_APPROVED → MIS', () => {
@@ -829,16 +812,13 @@ describe('getRequiredStage() — status → approval stage mapping', () => {
 // ─── 10. Workflow Service — isStageComplete() + getRoleForStage() ─────────────
 
 describe('isStageComplete() and getRoleForStage()', () => {
-  it('TREASURY stage is complete when status is TREASURY_APPROVED or later', () => {
-    expect(isStageComplete('TREASURY', 'TREASURY_APPROVED')).toBe(true)
-    expect(isStageComplete('TREASURY', 'HEAD_TREASURY_APPROVED')).toBe(true)
-    expect(isStageComplete('TREASURY', 'VOUCHER_PREPARED')).toBe(false)
+  it('HEAD_TREASURY stage is complete when status is HEAD_TREASURY_APPROVED or later', () => {
+    expect(isStageComplete('HEAD_TREASURY', 'HEAD_TREASURY_APPROVED')).toBe(true)
+    expect(isStageComplete('HEAD_TREASURY', 'MIS_APPROVED')).toBe(true)
+    expect(isStageComplete('HEAD_TREASURY', 'VOUCHER_PREPARED')).toBe(false)
   })
 
   it('MD stage is complete once its required prior status (AUDIT_APPROVED) is passed', () => {
-    // isStageComplete('MD', status) checks if currentStatus is BEYOND the required
-    // prior status (AUDIT_APPROVED). MD_APPROVED is AFTER AUDIT_APPROVED, so the
-    // MD stage is already complete at MD_APPROVED.
     expect(isStageComplete('MD', 'MD_APPROVED')).toBe(true)
     expect(isStageComplete('MD', 'OPERATIONS_COMPLETED')).toBe(true)
     // Not yet complete if we are still at AUDIT_APPROVED
@@ -846,7 +826,6 @@ describe('isStageComplete() and getRoleForStage()', () => {
   })
 
   it('getRoleForStage maps each stage to the correct role', () => {
-    expect(getRoleForStage('TREASURY')).toBe('TREASURY_OFFICER')
     expect(getRoleForStage('HEAD_TREASURY')).toBe('HEAD_TREASURY')
     expect(getRoleForStage('MIS')).toBe('MIS')
     expect(getRoleForStage('AUDIT')).toBe('AUDIT')
@@ -891,15 +870,15 @@ describe('ROLE_PERMISSIONS — role-to-action map completeness (Req 5.2)', () =>
     expect(perms).toContain('verify_signature')
     expect(perms).toContain('verify_investment')
     expect(perms).toContain('prepare_voucher')
-    expect(perms).toContain('approve_treasury')
     expect(perms).toContain('confirm_completion')
+    // Note: approve_treasury removed — Head Treasury approves directly after voucher is prepared
   })
 
   it('ACCOUNT_OFFICER can record confirmation but not create transactions', () => {
     const perms = ROLE_PERMISSIONS.ACCOUNT_OFFICER
     expect(perms).toContain('record_confirmation')
     expect(perms).not.toContain('create_transaction')
-    expect(perms).not.toContain('approve_treasury')
+    expect(perms).not.toContain('approve_head_treasury')
   })
 
   it('each approver role has exactly its own approval permission', () => {

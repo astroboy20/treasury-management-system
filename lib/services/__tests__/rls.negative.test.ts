@@ -75,7 +75,6 @@ function checkRecordConfirmationPermission(role: string): string | null {
  * Source: lib/actions/approval.actions.ts, STAGE_ROLE_MAP enforcement block.
  */
 const STAGE_ROLE_MAP: Record<string, string> = {
-  TREASURY:      'TREASURY_OFFICER',
   HEAD_TREASURY: 'HEAD_TREASURY',
   MIS:           'MIS',
   AUDIT:         'AUDIT',
@@ -183,7 +182,7 @@ describe('CUSTOMER_NEG_001 — Signature mismatch (Req 2.3, 8.3, 8.6)', () => {
       // Double-check the permission map (Req 5.2): ACCOUNT_OFFICER cannot
       // perform signature verification or approvals.
       expect(hasPermission('ACCOUNT_OFFICER', 'verify_signature' as never)).toBe(false)
-      expect(hasPermission('ACCOUNT_OFFICER', 'approve_treasury' as never)).toBe(false)
+      expect(hasPermission('ACCOUNT_OFFICER', 'approve_head_treasury' as never)).toBe(false)
     })
 
     it('no approval stage is required while the tx is stuck at INSTRUCTION_RECEIVED', () => {
@@ -303,7 +302,6 @@ describe('CUSTOMER_NEG_002 — Insufficient balance for Transfer Slip (Req 2.3, 
         'CUSTOMER_CONFIRMED',
         'INVESTMENT_VERIFIED',
         'VOUCHER_PREPARED',
-        'TREASURY_APPROVED',
         'HEAD_TREASURY_APPROVED',
         'MIS_APPROVED',
         'AUDIT_APPROVED',
@@ -460,20 +458,20 @@ describe('ACCOUNT_OFFICER attempting verifySignatureAction → expect 403 (Req 5
 // Requirement: 5.3 (Server Action returns 403 for unauthorised role)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('OPERATIONS attempting TREASURY-stage approval → expect 403 (Req 5.3, 12.4)', () => {
-  it('role check rejects OPERATIONS for TREASURY approval stage', () => {
-    const err = checkApprovalPermission('OPERATIONS', 'TREASURY')
+describe('OPERATIONS attempting HEAD_TREASURY-stage approval → expect 403 (Req 5.3, 12.4)', () => {
+  it('role check rejects OPERATIONS for HEAD_TREASURY approval stage', () => {
+    const err = checkApprovalPermission('OPERATIONS', 'HEAD_TREASURY')
     expect(err).not.toBeNull()
   })
 
   it('error message identifies the required role and the actual role', () => {
-    const err = checkApprovalPermission('OPERATIONS', 'TREASURY')!
-    expect(err).toMatch(/TREASURY_OFFICER/)
+    const err = checkApprovalPermission('OPERATIONS', 'HEAD_TREASURY')!
+    expect(err).toMatch(/HEAD_TREASURY/)
     expect(err).toMatch(/OPERATIONS/)
   })
 
-  it('OPERATIONS is rejected from all five approval stages', () => {
-    const stages = ['TREASURY', 'HEAD_TREASURY', 'MIS', 'AUDIT', 'MD']
+  it('OPERATIONS is rejected from all four approval stages', () => {
+    const stages = ['HEAD_TREASURY', 'MIS', 'AUDIT', 'MD']
     for (const stage of stages) {
       const err = checkApprovalPermission('OPERATIONS', stage)
       expect(err).not.toBeNull()
@@ -490,7 +488,7 @@ describe('OPERATIONS attempting TREASURY-stage approval → expect 403 (Req 5.3,
   })
 
   it('canActorAct returns false for OPERATIONS at VOUCHER_PREPARED (Req 5.2)', () => {
-    // VOUCHER_PREPARED is the status where TREASURY approval takes place.
+    // VOUCHER_PREPARED is the status where HEAD_TREASURY approval takes place.
     const canAct = canActorAct('OPERATIONS', makeTx('VOUCHER_PREPARED'), OTHER_ID)
     expect(canAct).toBe(false)
   })
@@ -498,7 +496,6 @@ describe('OPERATIONS attempting TREASURY-stage approval → expect 403 (Req 5.3,
   it('canActorAct returns false for OPERATIONS at all approval statuses', () => {
     const approvalStatuses = [
       'VOUCHER_PREPARED',
-      'TREASURY_APPROVED',
       'HEAD_TREASURY_APPROVED',
       'MIS_APPROVED',
       'AUDIT_APPROVED',
@@ -509,19 +506,18 @@ describe('OPERATIONS attempting TREASURY-stage approval → expect 403 (Req 5.3,
     }
   })
 
-  it('TREASURY_OFFICER passes the TREASURY-stage approval check', () => {
-    const err = checkApprovalPermission('TREASURY_OFFICER', 'TREASURY')
+  it('HEAD_TREASURY passes the HEAD_TREASURY-stage approval check', () => {
+    const err = checkApprovalPermission('HEAD_TREASURY', 'HEAD_TREASURY')
     expect(err).toBeNull()
   })
 
-  it('ACCOUNT_OFFICER is rejected from TREASURY-stage approval', () => {
-    const err = checkApprovalPermission('ACCOUNT_OFFICER', 'TREASURY')
+  it('ACCOUNT_OFFICER is rejected from HEAD_TREASURY-stage approval', () => {
+    const err = checkApprovalPermission('ACCOUNT_OFFICER', 'HEAD_TREASURY')
     expect(err).not.toBeNull()
   })
 
   it('each stage accepts only its designated role', () => {
     const stageRolePairs: Array<[string, string]> = [
-      ['TREASURY',      'TREASURY_OFFICER'],
       ['HEAD_TREASURY', 'HEAD_TREASURY'],
       ['MIS',           'MIS'],
       ['AUDIT',         'AUDIT'],
@@ -532,14 +528,19 @@ describe('OPERATIONS attempting TREASURY-stage approval → expect 403 (Req 5.3,
       // Correct role passes
       expect(checkApprovalPermission(correctRole, stage)).toBeNull()
 
-      // Wrong role is rejected — pick any other non-ADMIN role
-      const wrongRole = correctRole === 'OPERATIONS' ? 'TREASURY_OFFICER' : 'OPERATIONS'
+      // Wrong role is rejected
+      const wrongRole = correctRole === 'OPERATIONS' ? 'HEAD_TREASURY' : 'OPERATIONS'
       expect(checkApprovalPermission(wrongRole, stage)).not.toBeNull()
     }
   })
 
   it('ApprovalSchema rejects any APPROVE decision without a valid stage', () => {
     const result = ApprovalSchema.safeParse({ stage: 'OPERATIONS', decision: 'APPROVE' })
+    expect(result.success).toBe(false)
+  })
+
+  it('ApprovalSchema rejects the old TREASURY stage (removed from chain)', () => {
+    const result = ApprovalSchema.safeParse({ stage: 'TREASURY', decision: 'APPROVE' })
     expect(result.success).toBe(false)
   })
 })
@@ -599,10 +600,9 @@ describe('Maker-checker: creator cannot approve their own transaction (Req 5.4)'
     expect(canAct).toBe(true)
   })
 
-  it('maker-checker blocks all five approval stages for the transaction creator', () => {
+  it('maker-checker blocks all four approval stages for the transaction creator', () => {
     const approvalStatuses = [
       'VOUCHER_PREPARED',
-      'TREASURY_APPROVED',
       'HEAD_TREASURY_APPROVED',
       'MIS_APPROVED',
       'AUDIT_APPROVED',

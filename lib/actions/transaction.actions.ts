@@ -3,10 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getAuthenticatedUser, resolveUserRole } from '@/lib/services/auth.service'
-import {
-  CreateTransactionSchema,
-  type CreateTransactionInput,
-} from '@/lib/schemas/transaction.schema'
+import { CreateTransactionSchema } from '@/lib/schemas/transaction.schema'
+import type { CreateTransactionInput } from '@/lib/schemas/transaction.schema'
 
 // ─── Result type ─────────────────────────────────────────────────────────────
 
@@ -61,20 +59,18 @@ export async function createTransactionAction(
   // 5. Call the PostgreSQL RPC (Req 7.3)
   const supabase = await createClient()
 
-  // Map payment instruction to snake_case keys expected by the RPC (Req 7.7, 21.1).
-  // Pass as a plain object — Supabase PostgREST serialises JS objects into JSONB
-  // correctly. JSON.stringify() would pass a text literal, breaking JSONB operators.
-  const paymentInstructionRpc = parsed.data.paymentInstruction
-    ? {
-        beneficiary_name: parsed.data.paymentInstruction.beneficiaryName,
-        bank_name: parsed.data.paymentInstruction.bankName,
-        account_number: parsed.data.paymentInstruction.accountNumber,
-        account_type: parsed.data.paymentInstruction.accountType,
-        purpose: parsed.data.paymentInstruction.purpose ?? null,
-        is_internal: parsed.data.paymentInstruction.isInternal === true,
+  // Map payment instructions array to snake_case keys expected by the RPC (Req 7.7, 21.1).
+  const paymentInstructionsRpc = parsed.data.paymentInstructions?.length
+    ? parsed.data.paymentInstructions.map((pi) => ({
+        beneficiary_name: pi.beneficiaryName ?? null,
+        bank_name: pi.bankName ?? null,
+        account_number: pi.accountNumber ?? null,
+        account_type: pi.accountType ?? null,
+        purpose: pi.purpose ?? null,
+        is_internal: pi.isInternal === true,
         amount: null,
         transfer_charge: null,
-      }
+      }))
     : null
 
   const { data, error } = await supabase.rpc('create_treasury_transaction', {
@@ -85,7 +81,7 @@ export async function createTransactionAction(
     p_requested_amount: parsed.data.requestedAmount,
     p_purpose: parsed.data.purpose,
     p_source_type: parsed.data.sourceInstructionType,
-    p_payment_instruction: paymentInstructionRpc,
+    p_payment_instructions: paymentInstructionsRpc,
   })
 
   if (error) {

@@ -160,17 +160,18 @@ export interface TransactionWorkspace {
     created_at: string
   } | null
   /**
-   * Payment instruction data from the payment_instructions table (Req 21.1).
-   * Populated when a THIRD_PARTY_PAYMENT was created with paymentInstruction data.
+   * Payment instructions (Req 21.1) — for THIRD_PARTY_PAYMENT internal/external flag.
+   * One-to-many: a transaction can have multiple destination accounts.
    */
-  paymentInstruction: {
+  paymentInstructions: Array<{
     id: string
-    account_number: string
+    account_number: string | null
     beneficiary_name: string | null
     bank_name: string | null
     account_type: string | null
     is_internal: boolean
-  } | null
+    sort_order: number
+  }>
   approvals: Array<{
     id: string
     stage: string
@@ -470,12 +471,12 @@ export async function getTransactionWorkspace(
         .eq('transaction_id', transactionId)
         .order('created_at', { ascending: true }),
 
-      // Payment instruction (Req 21.1) — for THIRD_PARTY_PAYMENT internal/external flag
+      // Payment instructions (Req 21.1) — one-to-many, ordered by sort_order
       supabase
         .from('payment_instructions')
-        .select('id, account_number, beneficiary_name, bank_name, account_type, is_internal')
+        .select('id, account_number, beneficiary_name, bank_name, account_type, is_internal, sort_order')
         .eq('transaction_id', transactionId)
-        .maybeSingle(),
+        .order('sort_order', { ascending: true }),
     ])
 
   if (txResult.error || !txResult.data) return null
@@ -548,6 +549,6 @@ export async function getTransactionWorkspace(
       ...(e as Record<string, unknown>),
       actor: normaliseProfile((e as Record<string, unknown>).profiles),
     })) as TransactionWorkspace['auditEvents'],
-    paymentInstruction: piResult.data as TransactionWorkspace['paymentInstruction'],
+    paymentInstructions: (piResult.data ?? []) as TransactionWorkspace['paymentInstructions'],
   }
 }

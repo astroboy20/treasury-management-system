@@ -72,6 +72,11 @@ export const PaymentInstructionSchema = z.object({
 export type PaymentInstruction = z.infer<typeof PaymentInstructionSchema>
 
 // ============================================================
+// Array of payment instructions (multi-account support)
+// ============================================================
+export const PaymentInstructionsSchema = z.array(PaymentInstructionSchema).min(1)
+
+// ============================================================
 // Transaction types that require an external payment instruction
 // ============================================================
 const EXTERNAL_PAYMENT_TYPES: TransactionType[] = [
@@ -122,8 +127,9 @@ export const CreateTransactionSchema = z
 
     sourceInstructionType: SourceInstructionTypeEnum,
 
-    // paymentInstruction is conditionally required — enforced in .superRefine()
-    paymentInstruction: PaymentInstructionSchema.optional(),
+    // paymentInstructions is conditionally required for THIRD_PARTY_PAYMENT —
+    // enforced in .superRefine(). Array to support multiple destinations.
+    paymentInstructions: z.array(PaymentInstructionSchema).optional(),
 
     // requestedPayout is conditionally required for PARTIAL_PRINCIPAL rollovers
     requestedPayout: z
@@ -190,53 +196,53 @@ export const CreateTransactionSchema = z
       })
     }
 
-    // THIRD_PARTY_PAYMENT always requires a paymentInstruction block (Req 7.7, 21.1)
+    // THIRD_PARTY_PAYMENT always requires at least one paymentInstruction (Req 7.7, 21.1)
     if (EXTERNAL_PAYMENT_TYPES.includes(data.transactionType)) {
-      if (!data.paymentInstruction) {
+      if (!data.paymentInstructions || data.paymentInstructions.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['paymentInstruction'],
-          message: 'Payment instruction is required for this transaction type.',
+          path: ['paymentInstructions'],
+          message: 'At least one payment instruction is required for this transaction type.',
         })
         return
       }
 
-      const pi = data.paymentInstruction
+      data.paymentInstructions.forEach((pi, idx) => {
+        // Internal transfers (Req 21.1, 21.3): only accountNumber is required
+        if (pi.isInternal === true) {
+          if (!pi.accountNumber) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['paymentInstructions', idx, 'accountNumber'],
+              message: 'Internal account number is required for internal transfers.',
+            })
+          }
+          return
+        }
 
-      // Internal transfers (Req 21.1, 21.3): only accountNumber is required
-      if (pi.isInternal === true) {
+        // External transfers (Req 7.7, 36.1): all 3 fields required
+        if (!pi.beneficiaryName) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['paymentInstructions', idx, 'beneficiaryName'],
+            message: 'Beneficiary name is required.',
+          })
+        }
+        if (!pi.bankName) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['paymentInstructions', idx, 'bankName'],
+            message: 'Bank name is required.',
+          })
+        }
         if (!pi.accountNumber) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            path: ['paymentInstruction', 'accountNumber'],
-            message: 'Internal account number is required for internal transfers.',
+            path: ['paymentInstructions', idx, 'accountNumber'],
+            message: 'Account number is required.',
           })
         }
-        return
-      }
-
-      // External transfers (Req 7.7, 36.1): all 3 fields required
-      if (!pi.beneficiaryName) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['paymentInstruction', 'beneficiaryName'],
-          message: 'Beneficiary name is required.',
-        })
-      }
-      if (!pi.bankName) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['paymentInstruction', 'bankName'],
-          message: 'Bank name is required.',
-        })
-      }
-      if (!pi.accountNumber) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['paymentInstruction', 'accountNumber'],
-          message: 'Account number is required.',
-        })
-      }
+      })
     }
   })
 

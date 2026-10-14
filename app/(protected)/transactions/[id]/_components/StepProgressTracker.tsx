@@ -126,7 +126,7 @@ export default function StepProgressTracker({
         aria-label={`Transaction workflow steps — current status: ${currentStatus}`}
         className="border-b border-border bg-background px-5 py-4 sm:px-8"
       >
-        <ol className="flex items-center gap-0 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
+        <ol className="flex w-full items-center gap-0 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
           {steps.map((step, index) => {
             const isLast = index === steps.length - 1;
             const delayMs = index * 40;
@@ -153,42 +153,38 @@ export default function StepProgressTracker({
             return (
               <li
                 key={step.id}
-                className="flex min-w-0 flex-1 items-center"
+                className={[
+                  "flex items-center",
+                  isLast ? "shrink-0" : "flex-1",
+                ].join(" ")}
               >
-                {/* Step item */}
+                {/* Step node — shrink-0 so it stays at its natural size */}
                 <div
-                  className="flex min-w-[5.5rem] flex-col items-center gap-1.5 px-1"
+                  className="flex shrink-0 flex-col items-center gap-1.5"
                   style={itemStyle}
                 >
-                  {/* Icon — wrapped in Tooltip when locked with a reason */}
+                  {/* Icon */}
                   {step.state === "locked" && step.lockedReason ? (
                     <Tooltip>
                       <TooltipTrigger
                         aria-label={`Step ${step.id} locked: ${step.lockedReason}`}
                         className="cursor-default"
                       >
-                        <StepIcon
-                          state={step.state}
-                          id={step.id}
-                        />
+                        <StepIcon state={step.state} id={step.id} />
                       </TooltipTrigger>
-
                       <TooltipContent side="bottom" sideOffset={6}>
                         {step.lockedReason}
                       </TooltipContent>
                     </Tooltip>
                   ) : (
-                    <StepIcon
-                      state={step.state}
-                      id={step.id}
-                    />
+                    <StepIcon state={step.state} id={step.id} />
                   )}
 
                   {/* Label + sub-label */}
                   <div className="text-center">
                     <p
                       className={[
-                        "text-xs font-medium",
+                        "text-xs font-medium whitespace-nowrap",
                         step.state === "completed"
                           ? "text-emerald-700 dark:text-emerald-400"
                           : step.state === "active"
@@ -198,7 +194,6 @@ export default function StepProgressTracker({
                     >
                       {step.label}
                     </p>
-
                     <p className="hidden text-[0.65rem] text-muted-foreground sm:block">
                       {step.state === "completed"
                         ? "Done"
@@ -209,11 +204,9 @@ export default function StepProgressTracker({
                   </div>
                 </div>
 
-                {/* Connector line between steps */}
+                {/* Connector — flex-1 fills all remaining space in this <li> */}
                 {!isLast && (
-                  <Connector
-                    completed={step.state === "completed"}
-                  />
+                  <Connector completed={step.state === "completed"} />
                 )}
               </li>
             );

@@ -186,8 +186,12 @@ export const FundsOutVoucherSchema = z
     charge: numericString('Charge').default('0'),
 
     // net_amount — authoritative value computed by server; submitted
-    // for display/confirmation; server validates against snapshot
-    netAmount: positiveNumericString('Net amount'),
+    // for display/confirmation; server validates against snapshot.
+    // numericString (≥ 0) used here — a zero net amount is a business-logic
+    // concern (e.g. full COT on a tiny balance) handled server-side, not a
+    // schema hard-reject. positiveNumericString caused false failures when
+    // the COT useEffect hadn't yet updated the hidden input before submit.
+    netAmount: numericString('Net amount'),
 
     // availableBalance — for SAVINGS/CALL/CMS Funds-Out (Req 38)
     availableBalance: numericString('Available balance').optional(),

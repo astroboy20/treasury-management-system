@@ -12,8 +12,8 @@ There are 8 staff roles. Each role maps to a specific position in the transactio
 
 | Role Code         | Display Name          | Position in Workflow                                         |
 |-------------------|-----------------------|--------------------------------------------------------------|
-| `TREASURY_OFFICER`| Treasury Officer      | Creates transactions, verifies investments, prepares vouchers, approves at Treasury stage, confirms completion, creates reversals |
-| `ACCOUNT_OFFICER` | Account Officer       | Records customer confirmation (Step 3)                       |
+| `TREASURY_OFFICER`| Treasury Officer      | Creates transactions, handles all Steps 1–5 (signature verification, customer confirmation, investment verification, voucher preparation), confirms completion, creates reversals |
+| `ACCOUNT_OFFICER` | Account Officer       | Also records customer confirmation (Step 3)                  |
 | `HEAD_TREASURY`   | Head of Treasury      | Approves at Head Treasury stage                              |
 | `MIS`             | MIS Officer           | Approves at MIS stage                                        |
 | `AUDIT`           | Audit Officer         | Approves at Audit stage; full read access to audit history   |
@@ -33,7 +33,7 @@ Treasury Officer → Head of Treasury → MIS Officer → Audit Officer → Mana
 |--------------------------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | `create_transaction`     |   | ✓ |   |   |   |   |   | ✓ |
 | `verify_signature`       |   | ✓ |   |   |   |   |   | ✓ |
-| `record_confirmation`    | ✓ |   |   |   |   |   |   | ✓ |
+| `record_confirmation`    | ✓ | ✓ |   |   |   |   |   | ✓ |
 | `verify_investment`      |   | ✓ |   |   |   |   |   | ✓ |
 | `prepare_voucher`        |   | ✓ |   |   |   |   |   | ✓ |
 | `approve_treasury`       |   | ✓ |   |   |   |   |   | ✓ |

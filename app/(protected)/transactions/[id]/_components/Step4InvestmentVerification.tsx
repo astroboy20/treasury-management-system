@@ -219,7 +219,6 @@ export default function Step4InvestmentVerification({
 }: Step4InvestmentVerificationProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
-  const [documentUploaded, setDocumentUploaded] = useState(!!existingDocument)
 
   const {
     register,
@@ -263,8 +262,8 @@ export default function Step4InvestmentVerification({
         <style>{PANEL_ANIMATION_STYLE}</style>
         <SnapshotDisplay snapshot={investmentVerification} />
 
-        {/* Evidence upload — attach physical investment certificate or statement (Req 27.1) */}
-        <div className="rounded-lg border border-border bg-muted/20 p-4">
+        {/* Evidence upload — commented out, not needed in current flow */}
+        {/* <div className="rounded-lg border border-border bg-muted/20 p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Attach Investment Evidence
           </p>
@@ -276,7 +275,7 @@ export default function Step4InvestmentVerification({
             defaultDocumentType="EVIDENCE"
             existingDocument={existingDocument}
           />
-        </div>
+        </div> */}
       </div>
     )
   }
@@ -429,12 +428,7 @@ export default function Step4InvestmentVerification({
         {/* Submit / permission notice */}
         {canAct ? (
           <div className="flex flex-col gap-1.5 items-end pt-1">
-            {!documentUploaded && (
-              <p className="text-xs text-destructive" role="alert">
-                An evidence document must be uploaded before saving the snapshot.
-              </p>
-            )}
-            <Button type="submit" disabled={submitting || !documentUploaded} size="sm">
+            <Button type="submit" disabled={submitting} size="sm">
               {submitting ? 'Saving snapshot…' : 'Confirm & Save Snapshot'}
             </Button>
           </div>
@@ -445,8 +439,8 @@ export default function Step4InvestmentVerification({
         )}
       </form>
 
-      {/* Evidence upload — available even before verification is submitted (Req 27.1) */}
-      <div className="rounded-lg border border-border bg-muted/20 p-4">
+      {/* Evidence upload — commented out, not needed in current flow */}
+      {/* <div className="rounded-lg border border-border bg-muted/20 p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Attach Investment Evidence <span className="text-destructive">*</span>
         </p>
@@ -460,7 +454,7 @@ export default function Step4InvestmentVerification({
           existingDocument={existingDocument}
           onUploadSuccess={() => setDocumentUploaded(true)}
         />
-      </div>
+      </div> */}
     </div>
   )
 }

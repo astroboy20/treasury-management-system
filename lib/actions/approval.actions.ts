@@ -3,25 +3,22 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getAuthenticatedUser, resolveUserRole } from '@/lib/services/auth.service'
-import {
-  ApprovalSchema,
-  type ApprovalStage,
-  type ApprovalDecision,
-} from '@/lib/schemas/approval.schema'
+import { ApprovalSchema } from '@/lib/schemas/approval.schema'
+import type { ApprovalStage, ApprovalDecision } from '@/lib/schemas/approval.schema'
 import type { ActionResult } from '@/lib/actions/transaction.actions'
 
 // ─── Stage → required role mapping ───────────────────────────────────────────
 
 /**
  * Maps each approval stage to the role that must perform it.
- * Used for server-side role enforcement before calling the RPC (Req 5.2, 12.1).
+ * Full 5-stage chain: Treasury Officer (checker) → Head Treasury → MIS → Audit → MD
  */
 const STAGE_ROLE_MAP: Record<ApprovalStage, string> = {
-  TREASURY: 'TREASURY_OFFICER',
+  TREASURY:      'TREASURY_OFFICER',
   HEAD_TREASURY: 'HEAD_TREASURY',
-  MIS: 'MIS',
-  AUDIT: 'AUDIT',
-  MD: 'MD',
+  MIS:           'MIS',
+  AUDIT:         'AUDIT',
+  MD:            'MD',
 }
 
 // ─── approveTransactionAction ─────────────────────────────────────────────────

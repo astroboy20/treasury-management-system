@@ -3,8 +3,8 @@
 import {
   markNotificationsRead,
   getRecentNotifications,
-  type Notification,
 } from '@/lib/services/notification.service'
+import type { Notification } from '@/lib/services/notification.service'
 import { getAuthenticatedUser } from '@/lib/services/auth.service'
 
 /**

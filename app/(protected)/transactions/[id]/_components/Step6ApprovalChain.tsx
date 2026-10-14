@@ -45,15 +45,15 @@ interface StageDef {
 const STAGES: StageDef[] = [
   {
     stage: 'TREASURY',
-    label: 'Treasury Approval',
+    label: 'Treasury Sign-off',
     roleCode: 'TREASURY_OFFICER',
-    roleLabel: 'Treasury Officer',
+    roleLabel: 'Treasury Officer (Checker)',
     prerequisiteStatus: 'VOUCHER_PREPARED',
     approvedStatus: 'TREASURY_APPROVED',
   },
   {
     stage: 'HEAD_TREASURY',
-    label: 'Head Treasury Approval',
+    label: 'Head Treasury Review',
     roleCode: 'HEAD_TREASURY',
     roleLabel: 'Head of Treasury',
     prerequisiteStatus: 'TREASURY_APPROVED',
@@ -61,7 +61,7 @@ const STAGES: StageDef[] = [
   },
   {
     stage: 'MIS',
-    label: 'MIS Approval',
+    label: 'MIS Review',
     roleCode: 'MIS',
     roleLabel: 'MIS Officer',
     prerequisiteStatus: 'HEAD_TREASURY_APPROVED',
@@ -69,7 +69,7 @@ const STAGES: StageDef[] = [
   },
   {
     stage: 'AUDIT',
-    label: 'Audit Approval',
+    label: 'Audit Review',
     roleCode: 'AUDIT',
     roleLabel: 'Audit Officer',
     prerequisiteStatus: 'MIS_APPROVED',
@@ -85,7 +85,6 @@ const STAGES: StageDef[] = [
   },
 ]
 
-// Statuses that mean the approval chain is at or past this stage
 const STATUS_ORDER = [
   'VOUCHER_PREPARED',
   'TREASURY_APPROVED',
@@ -121,8 +120,14 @@ function resolveStageState(stage: StageDef, currentStatus: string): StageState {
   // If current status is an exception, all stages before the exception are either
   // completed (if their approved status comes before the last approved one) or locked.
   if (EXCEPTION_STATUSES.has(currentStatus)) {
-    // A stage is completed if its approval record exists (checked at render via approvals map)
-    // For exception statuses we fall back to index comparison
+    // For RETURNED: a stage is completed if an approval record exists for it
+    // (checked at render via approvals map). Fall back to index for REJECTED/CANCELLED.
+    if (currentStatus === 'RETURNED') {
+      // resolveStageState is called before the approvalMap check in the render loop,
+      // so we return 'locked' here — the render loop upgrades to 'completed' if
+      // an approval record exists.
+      return 'locked'
+    }
     if (approvedIdx !== -1 && currentIdx !== -1 && approvedIdx < currentIdx) return 'completed'
     return 'locked'
   }
@@ -153,7 +158,7 @@ const DECISION_CONFIG: Record<
     icon: <CheckCircle2 className="size-3" aria-hidden />,
   },
   RETURN: {
-    label: 'Returned',
+    label: 'Recalled',
     className: 'bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200',
     icon: <CornerUpLeft className="size-3" aria-hidden />,
   },
@@ -337,13 +342,13 @@ function ActiveRow({
   }
 
   const dialogTitle =
-    pendingDecision === 'RETURN' ? 'Return Transaction' : 'Reject Transaction'
+    pendingDecision === 'RETURN' ? 'Recall Transaction' : 'Reject Transaction'
   const dialogDescription =
     pendingDecision === 'RETURN'
-      ? 'The transaction will be sent back to the maker for correction. A non-empty comment is required.'
+      ? 'The transaction will be recalled and sent back to the maker for correction. A non-empty comment is required.'
       : 'The transaction will be permanently rejected and no further action can be taken. A non-empty comment is required.'
   const dialogActionLabel =
-    pendingDecision === 'RETURN' ? 'Confirm Return' : 'Confirm Reject'
+    pendingDecision === 'RETURN' ? 'Confirm Recall' : 'Confirm Reject'
   const dialogActionVariant: 'default' | 'destructive' =
     pendingDecision === 'REJECT' ? 'destructive' : 'default'
 
@@ -380,7 +385,7 @@ function ActiveRow({
               Approve
             </Button>
 
-            {/* Return */}
+            {/* Recall */}
             <Button
               size="sm"
               variant="outline"
@@ -389,7 +394,7 @@ function ActiveRow({
               className="gap-1.5"
             >
               <CornerUpLeft className="size-3.5" aria-hidden />
-              Return
+              Recall
             </Button>
 
             {/* Reject */}
@@ -493,21 +498,21 @@ interface Step6ApprovalChainProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 /**
- * Step 6 — Approval Chain Panel.
+ * Approval Chain Panel.
  *
- * Renders all five approval stages with contextual state per stage:
+ * Renders all four approval stages with contextual state per stage:
  *   - `completed` → read-only row: actor, decision badge, timestamp, comments
  *   - `active`    → action row with Approve / Return / Reject buttons (role-gated)
  *   - `locked`    → greyed-out placeholder with locked icon
  *
- * Rules enforced:
- *   - Action buttons only shown when currentUser.role === stage.roleCode AND user ≠ tx creator (Req 5.4, 12.4)
- *   - Return/Reject decisions open a Dialog requiring non-empty comments (Req 12.6, 12.7, 13.4)
- *   - Approval submitted via approveTransactionAction; Sonner toast on result
- *   - All five stages always visible for full context (Req 13.1, 13.5)
+ * Stages: Treasury Officer (checker) → Head Treasury → MIS → Audit → MD
  *
- * After any successful action the page is refreshed via router.refresh() to
- * re-hydrate the server-component workspace with the new status.
+ * Rules enforced:
+ *   - Treasury Officer checker signs first (must be different from the maker — maker-checker)
+ *   - Action buttons only shown when currentUser.role === stage.roleCode AND user ≠ tx creator
+ *   - Return/Reject decisions open a Dialog requiring non-empty comments
+ *   - Approval submitted via approveTransactionAction; Sonner toast on result
+ *   - All five stages always visible for full context
  *
  * Requirements: 12.1, 12.5, 12.6, 12.7, 13.1, 13.2, 13.3, 13.4, 13.5
  */
@@ -540,14 +545,14 @@ export default function Step6ApprovalChain({
               {transactionStatus === 'REJECTED'
                 ? 'rejected'
                 : transactionStatus === 'RETURNED'
-                ? 'returned for correction'
+                ? 'recalled for correction'
                 : 'halted'}
             </p>
             <p className="text-xs text-amber-700">
               {transactionStatus === 'REJECTED'
                 ? 'This transaction has been permanently rejected. No further actions are possible.'
                 : transactionStatus === 'RETURNED'
-                ? 'This transaction has been returned to the maker for correction. Once resubmitted it will re-enter the approval chain.'
+                ? 'This transaction has been recalled by an approver. The maker must correct and resubmit the voucher to restart the approval chain.'
                 : 'This transaction is in an exception state and requires review before the approval chain can resume.'}
             </p>
           </div>

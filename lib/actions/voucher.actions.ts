@@ -5,9 +5,9 @@ import { createClient } from '@/lib/supabase/server'
 import { getAuthenticatedUser, resolveUserRole } from '@/lib/services/auth.service'
 import {
   VoucherPreparationSchema,
-  type VoucherPreparationInput,
   TX_TYPE_TO_VOUCHER_TYPE,
 } from '@/lib/schemas/voucher.schema'
+import type { VoucherPreparationInput } from '@/lib/schemas/voucher.schema'
 import type { ActionResult } from '@/lib/actions/transaction.actions'
 import type { CalculationSnapshot, RolloverResult } from '@/lib/services/calculation.service'
 
@@ -564,8 +564,14 @@ export async function prepareVoucherAction(
       ? (calculationSnapshot.outputs as Record<string, string>).cot_charge ?? '0'
       : '0'
 
+    // For CALL/CMS: net amount = available balance minus the COT charge (COT SOP).
+    // The customer receives the available balance less the bank's commission.
+    const netAmount = isCot
+      ? String((Math.round((parseFloat(availBal) - parseFloat(cotCharge)) * 1e4) / 1e4).toFixed(4))
+      : availBal
+
     voucherData.available_balance = availBal
-    voucherData.net_amount = availBal
+    voucherData.net_amount = netAmount
     voucherData.principal = '0'
     voucherData.interest = '0'
     voucherData.wht = '0'

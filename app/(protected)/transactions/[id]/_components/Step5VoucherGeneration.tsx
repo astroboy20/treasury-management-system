@@ -38,9 +38,11 @@ interface Step5VoucherGenerationProps {
   transactionId: string
   transactionType: string
   scenarioCode: string | null
+  /** Current transaction status — used to detect RETURNED state for resubmission */
+  transactionStatus: string
   /** The investment verification snapshot — used for calculation preview */
   investmentVerification: TransactionWorkspace['investmentVerification']
-  /** Existing voucher — if present, panel is read-only / completed */
+  /** Existing voucher — if present, panel is read-only unless status is RETURNED */
   voucher: TransactionWorkspace['voucher']
   /** Whether the current user can act (TREASURY_OFFICER) */
   canAct: boolean
@@ -605,7 +607,12 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
           />
         </FormField>
         {/* FIX: was missing — required by superRefine() for external transfers */}
-        <FormField id="pi-amount" label="Transfer Amount" error={errs['paymentInstruction.amount']?.message}>
+        <FormField
+          id="pi-amount"
+          label="Transfer Amount"
+          hint="Pre-filled from net amount — edit for partial withdrawals"
+          error={errs['paymentInstruction.amount']?.message}
+        >
           <Input
             id="pi-amount"
             type="text"
@@ -660,8 +667,10 @@ function PaymentInstructionSubForm({ disabled, register, errors, isInternalPayme
  */
 function FinalisedVoucherDisplay({
   voucher,
+  transactionType,
 }: {
   voucher: NonNullable<TransactionWorkspace['voucher']>
+  transactionType?: string
 }) {
   const isFinalised = voucher.status === 'FINALISED'
 
@@ -706,7 +715,10 @@ function FinalisedVoucherDisplay({
 
       {/* Payment instruction block */}
       {voucher.payment_instruction && (
-        <PaymentInstructionBlock instruction={voucher.payment_instruction} />
+        <PaymentInstructionBlock
+          instruction={voucher.payment_instruction}
+          transactionType={transactionType}
+        />
       )}
     </div>
   )
@@ -919,9 +931,16 @@ function TransferSlipContent({ voucher }: { voucher: NonNullable<TransactionWork
 
 function PaymentInstructionBlock({
   instruction,
+  transactionType,
 }: {
   instruction: Record<string, unknown>
+  transactionType?: string
 }) {
+  const isCotTransaction = transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT'
+  const isInternal = instruction.is_internal === true || instruction.is_internal === 'true' ||
+    instruction.isInternal === true || instruction.isInternal === 'true'
+  const transferCharge = String(instruction.transfer_charge ?? instruction.transferCharge ?? '0')
+
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
       <div className="flex items-center gap-2">
@@ -933,7 +952,19 @@ function PaymentInstructionBlock({
         <Field label="Bank Name" value={String(instruction.bank_name ?? instruction.bankName ?? '—')} />
         <Field label="Account Number" value={String(instruction.account_number ?? instruction.accountNumber ?? '—')} />
         <Field label="Account Type" value={String(instruction.account_type ?? instruction.accountType ?? '—')} />
-        <Field label="Transfer Charge" value={formatCurrency(String(instruction.transfer_charge ?? instruction.transferCharge ?? '0'))} />
+        <Field label="Amount" value={formatCurrency(String(instruction.amount ?? '0'))} />
+        {/* Transfer Charge only applies to THIRD_PARTY_PAYMENT (0.10%).
+            Not shown for CALL/CMS — those carry a COT charge shown above. */}
+        {!isCotTransaction && (
+          <Field
+            label={isInternal ? 'Transfer Charge' : 'Transfer Charge (0.10%)'}
+            value={
+              <span className={isInternal || parseFloat(transferCharge) === 0 ? 'text-muted-foreground' : 'font-medium text-foreground'}>
+                {isInternal ? '₦0.00 (internal — no charge)' : formatCurrency(transferCharge)}
+              </span>
+            }
+          />
+        )}
         {Boolean(instruction.purpose) && (
           <Field label="Purpose" value={String(instruction.purpose)} />
         )}
@@ -991,13 +1022,34 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
       ? (Math.round((ratePerMille * availVal) / 1000 * 1e4) / 1e4)
       : null
 
-  // Keep cotCharge field in sync with the live estimate so it's in the submitted payload
+  // Net amount = available balance - COT charge (COT SOP)
+  const estimatedNetAmount =
+    isCot && estimatedCot !== null
+      ? (Math.round((availVal - estimatedCot) * 1e4) / 1e4)
+      : availVal
+
+  // On mount and whenever snapshot changes: push values into RHF via setValue.
+  // JSX `defaultValue` and plain `value` on hidden inputs do NOT update RHF's
+  // internal store — only setValue() does. This is the single source of truth.
+  useEffect(() => {
+    if (!setValue) return
+    const avail = snapshot.available_amount ?? '0'
+    setValue('availableBalance' as never, avail as never, { shouldValidate: false })
+    setValue('netAmount' as never, avail as never, { shouldValidate: false })
+    setValue('paymentInstruction.amount' as never, avail as never, { shouldValidate: false })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot.available_amount])
+
+  // Keep cotCharge and netAmount in sync once COT rate is selected
   useEffect(() => {
     if (!setValue || !isCot) return
     if (estimatedCot !== null) {
       setValue('cotCharge' as never, String(estimatedCot) as never, { shouldValidate: false })
+      const net = String(estimatedNetAmount)
+      setValue('netAmount' as never, net as never, { shouldValidate: false })
+      setValue('paymentInstruction.amount' as never, net as never, { shouldValidate: false })
     }
-  }, [estimatedCot, isCot, setValue])
+  }, [estimatedCot, estimatedNetAmount, isCot, setValue])
 
   return (
     <div className="space-y-4">
@@ -1030,7 +1082,7 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {/* Available Balance */}
+        {/* Available Balance — driven by setValue on mount */}
         <FormField
           id="sfo-available-balance"
           label="Available Balance (₦)"
@@ -1041,28 +1093,27 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
             id="sfo-available-balance"
             type="text"
             inputMode="decimal"
-            defaultValue={snapshot.available_amount}
             disabled={disabled}
             {...register('availableBalance' as never)}
             className="text-sm"
           />
         </FormField>
 
-        {/* Net Amount */}
+        {/* Net Amount — driven entirely by setValue above, read-only for COT */}
         <FormField
           id="sfo-net-amount"
           label="Net Amount (₦)"
-          hint="Equals the available balance for this type"
+          hint={isCot ? "Available Balance minus COT Charge" : "Equals the available balance for this type"}
           error={errs.netAmount?.message}
         >
           <Input
             id="sfo-net-amount"
             type="text"
             inputMode="decimal"
-            defaultValue={snapshot.available_amount}
+            readOnly={isCot}
             disabled={disabled}
             {...register('netAmount' as never)}
-            className="text-sm"
+            className={`text-sm ${isCot ? 'bg-muted/40 font-medium' : ''}`}
           />
         </FormField>
 
@@ -1113,10 +1164,10 @@ function SavingsFundsOutForm({ disabled, register, errors, snapshot, transaction
               <div className="sm:col-span-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-1">
                 <p className="text-xs font-semibold text-amber-800">COT Calculation Preview</p>
                 <p className="font-mono text-xs text-amber-700">
-                  (₦{ratePerMille} × {formatCurrency(String(availVal))}) ÷ 1,000 = {formatCurrency(String(estimatedCot))}
+                  COT = (₦{ratePerMille} × {formatCurrency(String(availVal))}) ÷ 1,000 = {formatCurrency(String(estimatedCot))}
                 </p>
-                <p className="text-[10px] text-amber-600/80">
-                  Authoritative value computed server-side.
+                <p className="font-mono text-xs text-amber-700">
+                  Net Amount = {formatCurrency(String(availVal))} − {formatCurrency(String(estimatedCot))} = {formatCurrency(String(estimatedNetAmount))}
                 </p>
               </div>
             )}
@@ -1225,8 +1276,10 @@ function FundsOutForm({ disabled, register, errors, snapshot, transactionType, s
     if (!isThirdParty || isInternalPayment) return
     if (!setValue || !watch) return
 
-    const piAmount = (watch('paymentInstruction.amount' as never) as unknown) as string | undefined
-    if (!piAmount && watchedNetAmount) {
+    // Always keep paymentInstruction.amount in sync with netAmount so it's
+    // pre-filled and stays up to date if the net amount changes (e.g. COT rate
+    // selection changes the net amount for Call/CMS transactions).
+    if (watchedNetAmount) {
       setValue('paymentInstruction.amount' as never, watchedNetAmount as never, { shouldValidate: false })
     }
     if (estimatedThirdPartyCharge !== null) {
@@ -1673,14 +1726,18 @@ function buildDefaults(
 
     // Savings/Call/CMS Funds-Out: pre-fill availableBalance from snapshot (Req 38.1)
     if (isSavingsFundsOut) {
+      const isCotType = transactionType === 'CALL_FUNDS_OUT' || transactionType === 'CMS_FUNDS_OUT'
+      const availAmount = snapshot?.available_amount ?? ''
       return {
         voucherType: 'FUNDS_OUT',
         principal: '0',
         interest: '0',
         wht: '0',
         charge: '0',
-        availableBalance: snapshot?.available_amount ?? '',
-        netAmount: snapshot?.available_amount ?? '',
+        availableBalance: availAmount,
+        // Net amount starts as available balance; COT useEffect will subtract the charge
+        // once the Treasury Officer selects a rate tier.
+        netAmount: availAmount,
         transferDate: todayStr,
         remarks: '',
         // COT rate tier has no sensible default — the Treasury Officer must select
@@ -1688,6 +1745,20 @@ function buildDefaults(
         cotCharge: '0',
         // Thread the transactionTypeHint so superRefine can enforce cotRateTier
         transactionTypeHint: transactionType,
+        // Pre-fill transfer amount from available balance for Call/CMS so the field
+        // is never blank. The sync useEffect will update it once COT is selected.
+        paymentInstruction: isCotType
+          ? {
+              beneficiaryName: '',
+              bankName: '',
+              accountNumber: '',
+              accountType: '',
+              amount: availAmount,
+              transferCharge: '0',
+              purpose: '',
+              isInternal: false,
+            }
+          : undefined,
       } satisfies Partial<FundsOutVoucherInput>
     }
 
@@ -1821,6 +1892,7 @@ export default function Step5VoucherGeneration({
   transactionId,
   transactionType,
   scenarioCode,
+  transactionStatus,
   investmentVerification,
   voucher,
   canAct,
@@ -1829,7 +1901,6 @@ export default function Step5VoucherGeneration({
 }: Step5VoucherGenerationProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
-  const [documentUploaded, setDocumentUploaded] = useState(!!existingDocument)
 
   // Derive isInternalPayment from the transaction's payment instruction (Req 21.1, 21.3)
   const isInternalPayment = existingPaymentInstruction?.is_internal ?? false
@@ -1915,28 +1986,15 @@ export default function Step5VoucherGeneration({
   // Watch requestedPayout for PARTIAL_PRINCIPAL live preview
   const watchedRequestedPayout = (watch('requestedPayout' as never) as unknown) as string | undefined
 
-  // ── Read-only mode — voucher already exists ─────────────────────────────────
+  // ── Read-only mode — voucher already exists (unless RETURNED for resubmission) ──
 
-  if (voucher) {
+  const isReturned = transactionStatus === 'RETURNED'
+
+  if (voucher && !isReturned) {
     return (
       <div className="voucher-panel space-y-5">
         <style>{PANEL_ANIMATION_STYLE}</style>
         <VoucherDisplay voucher={voucher} transactionType={transactionType} />
-
-        {/* Signed voucher / evidence upload — attach the physically signed voucher (Req 27.1) */}
-        <div className="rounded-lg border border-border bg-muted/20 p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Attach Signed Voucher
-          </p>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Upload the physically signed copy of this voucher or any additional supporting evidence.
-          </p>
-          <DocumentUpload
-            transactionId={transactionId}
-            defaultDocumentType="SIGNED_FORM"
-            existingDocument={existingDocument}
-          />
-        </div>
       </div>
     )
   }
@@ -1967,6 +2025,25 @@ export default function Step5VoucherGeneration({
     >
       <style>{PANEL_ANIMATION_STYLE}</style>
 
+      {/* Return notice — shown when resubmitting after an approver returned the transaction */}
+      {isReturned && (
+        <Alert variant="destructive">
+          <AlertTitle>Transaction Recalled for Correction</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span className="block">
+              An approver has recalled this transaction. Review the recall comment in the
+              Approval Chain section, make any necessary corrections, then re-prepare the
+              voucher below to restart the approval chain.
+            </span>
+            {!canAct && (
+              <span className="block font-medium">
+                Only the Treasury Officer can edit and resubmit this voucher.
+              </span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Req 11.1 / 11.2 — Voucher type display: server-resolved, read-only */}
       <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
         <Receipt className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -1985,7 +2062,7 @@ export default function Step5VoucherGeneration({
           )}
         </div>
         <span className="ml-auto text-[10px] text-muted-foreground/60">
-          auto-determined from transaction type
+          Auto-determined from transaction type
         </span>
       </div>
 
@@ -2052,13 +2129,10 @@ export default function Step5VoucherGeneration({
         {/* Submit / permission notice */}
         {canAct ? (
           <div className="flex flex-col gap-1.5 items-end pt-1">
-            {!documentUploaded && (
-              <p className="text-xs text-destructive" role="alert">
-                A signed document must be uploaded before preparing the voucher.
-              </p>
-            )}
-            <Button type="submit" disabled={submitting || !documentUploaded} size="sm">
-              {submitting ? 'Preparing voucher…' : 'Prepare Voucher'}
+            <Button type="submit" disabled={submitting} size="sm">
+              {submitting
+                ? (isReturned ? 'Resubmitting…' : 'Preparing voucher…')
+                : (isReturned ? 'Resubmit Voucher' : 'Prepare Voucher')}
             </Button>
           </div>
         ) : (
@@ -2068,8 +2142,8 @@ export default function Step5VoucherGeneration({
         )}
       </form>
 
-      {/* Signed form upload — required before voucher can be prepared (Req 27.1) */}
-      <div className="rounded-lg border border-border bg-muted/20 p-4">
+      {/* Signed form upload — commented out, not needed in current flow */}
+      {/* <div className="rounded-lg border border-border bg-muted/20 p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Attach Signed Form <span className="text-destructive">*</span>
         </p>
@@ -2083,7 +2157,7 @@ export default function Step5VoucherGeneration({
           existingDocument={existingDocument}
           onUploadSuccess={() => setDocumentUploaded(true)}
         />
-      </div>
+      </div> */}
     </div>
   )
 }

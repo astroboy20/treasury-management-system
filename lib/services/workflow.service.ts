@@ -112,9 +112,8 @@ export function canActorAct(
 ): boolean {
   const { status } = tx
 
-  // Maker-checker: creator cannot approve their own transaction
+  // Maker-checker: creator cannot approve at the TREASURY checker stage
   if (tx.created_by === actorId) {
-    // Only blocks approval stages, not other actions
     const approvalStatuses = [
       'VOUCHER_PREPARED',
       'TREASURY_APPROVED',
@@ -129,9 +128,11 @@ export function canActorAct(
     case 'TREASURY_OFFICER':
       return [
         'INSTRUCTION_RECEIVED',
+        'SIGNATURE_VERIFIED',
         'CUSTOMER_CONFIRMED',
         'INVESTMENT_VERIFIED',
-        'VOUCHER_PREPARED',
+        'VOUCHER_PREPARED',      // Treasury checker signs here
+        'RETURNED',              // Maker can resubmit after a return
         'OPERATIONS_COMPLETED',
       ].includes(status)
 
@@ -160,104 +161,72 @@ export function canActorAct(
 
 /**
  * Builds the step metadata array for the StepProgressTracker.
- * Each step has a state: completed | active | locked.
+ * Returns 2 steps matching the UI layout:
+ *   1. Instruction & Verification (covers old steps 1–5, managed by Treasury Maker)
+ *   2. Approval Chain (Head Treasury → MIS → Audit → MD)
  */
 export function buildStepsMeta(status: string, signatureResult?: string | null): StepMeta[] {
   const statusIndex = STATUS_ORDER.indexOf(status as WorkflowStatus)
   const signatureFailed = signatureResult === 'FAILED'
 
-  const steps: Omit<StepMeta, 'state' | 'lockedReason'>[] = [
-    { id: 1, label: 'Instruction',       description: 'Customer instruction recorded' },
-    { id: 2, label: 'Signature',         description: 'Signature verification' },
-    { id: 3, label: 'Confirmation',      description: 'Customer telephone confirmation' },
-    { id: 4, label: 'Investment',        description: 'Investment data verified' },
-    { id: 5, label: 'Voucher',           description: 'Treasury voucher prepared' },
-    { id: 6, label: 'Approval',          description: 'Five-stage approval chain' },
+  // ── Step 1: Instruction & Verification ──────────────────────────────────────
+  // Active when: transaction exists but VOUCHER_PREPARED not yet reached,
+  // OR the transaction was RETURNED (maker needs to correct and resubmit).
+  // Completed once VOUCHER_PREPARED is reached (and not RETURNED).
+  let step1State: StepState = 'active'
+  let step1LockedReason: string | undefined
+
+  if (status === 'RETURNED') {
+    // Returned — open Step 1 so the maker can correct and resubmit
+    step1State = 'active'
+  } else if (signatureFailed) {
+    step1State = 'active'
+  } else if (statusIndex >= STATUS_ORDER.indexOf('VOUCHER_PREPARED')) {
+    step1State = 'completed'
+  } else {
+    step1State = 'active'
+  }
+
+  // ── Step 2: Approval Chain ───────────────────────────────────────────────────
+  // Active from VOUCHER_PREPARED onwards (except when RETURNED — chain paused).
+  // Completed once MD_APPROVED is passed.
+  let step2State: StepState = 'locked'
+  let step2LockedReason: string | undefined
+
+  const approvalStart = STATUS_ORDER.indexOf('VOUCHER_PREPARED')
+  const approvalDone  = STATUS_ORDER.indexOf('MD_APPROVED')
+
+  if (status === 'RETURNED') {
+    step2State = 'locked'
+    step2LockedReason = 'Transaction recalled for correction — resubmit voucher to restart chain'
+  } else if (signatureFailed) {
+    step2State = 'locked'
+    step2LockedReason = 'Signature verification failed — contact compliance'
+  } else if (statusIndex > approvalDone || status === 'COMPLETED') {
+    step2State = 'completed'
+  } else if (statusIndex >= approvalStart) {
+    step2State = 'active'
+  } else {
+    step2State = 'locked'
+    step2LockedReason = 'Awaiting instruction & verification'
+  }
+
+  return [
+    {
+      id: 1,
+      label: 'Instruction & Verification',
+      description: 'Treasury maker completes instruction, verification and voucher',
+      state: step1State,
+      lockedReason: step1LockedReason,
+    },
+    {
+      id: 2,
+      label: 'Approval Chain',
+      description: 'Treasury Officer → Head of Treasury → MIS → Audit → MD',
+      state: step2State,
+      lockedReason: step2LockedReason,
+    },
   ]
-
-  return steps.map((step) => {
-    let state: StepState = 'locked'
-    let lockedReason: string | undefined
-
-    switch (step.id) {
-      case 1:
-        // Always completed once a transaction exists
-        state = 'completed'
-        break
-
-      case 2:
-        if (statusIndex >= STATUS_ORDER.indexOf('SIGNATURE_VERIFIED')) {
-          state = 'completed'
-        } else if (status === 'INSTRUCTION_RECEIVED') {
-          state = 'active'
-        } else {
-          state = 'locked'
-          lockedReason = 'Awaiting signature verification'
-        }
-        break
-
-      case 3:
-        if (signatureFailed) {
-          state = 'locked'
-          lockedReason = 'Signature verification failed — contact compliance'
-        } else if (statusIndex >= STATUS_ORDER.indexOf('CUSTOMER_CONFIRMED')) {
-          state = 'completed'
-        } else if (status === 'SIGNATURE_VERIFIED') {
-          state = 'active'
-        } else {
-          state = 'locked'
-          lockedReason = 'Awaiting signature verification'
-        }
-        break
-
-      case 4:
-        if (signatureFailed) {
-          state = 'locked'
-          lockedReason = 'Signature verification failed — contact compliance'
-        } else if (statusIndex >= STATUS_ORDER.indexOf('INVESTMENT_VERIFIED')) {
-          state = 'completed'
-        } else if (status === 'CUSTOMER_CONFIRMED') {
-          state = 'active'
-        } else {
-          state = 'locked'
-          lockedReason = 'Awaiting customer confirmation'
-        }
-        break
-
-      case 5:
-        if (signatureFailed) {
-          state = 'locked'
-          lockedReason = 'Signature verification failed — contact compliance'
-        } else if (statusIndex >= STATUS_ORDER.indexOf('VOUCHER_PREPARED')) {
-          state = 'completed'
-        } else if (status === 'INVESTMENT_VERIFIED') {
-          state = 'active'
-        } else {
-          state = 'locked'
-          lockedReason = 'Awaiting investment verification'
-        }
-        break
-
-      case 6: {
-        const approvalStart = STATUS_ORDER.indexOf('VOUCHER_PREPARED')
-        const completed = STATUS_ORDER.indexOf('MD_APPROVED')
-        if (signatureFailed) {
-          state = 'locked'
-          lockedReason = 'Signature verification failed — contact compliance'
-        } else if (statusIndex > completed || status === 'COMPLETED') {
-          state = 'completed'
-        } else if (statusIndex >= approvalStart) {
-          state = 'active'
-        } else {
-          state = 'locked'
-          lockedReason = 'Awaiting voucher preparation'
-        }
-        break
-      }
-    }
-
-    return { ...step, state, lockedReason }
-  })
 }
 
 /**

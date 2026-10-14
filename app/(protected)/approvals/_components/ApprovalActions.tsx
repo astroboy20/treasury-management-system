@@ -101,7 +101,7 @@ export default function ApprovalActions({ transactionId, stage }: ApprovalAction
 
       {/* Comment dialog for RETURN / REJECT */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md ">
           <DialogHeader>
             <DialogTitle>
               {pendingDecision === 'REJECT' ? 'Reject transaction' : 'Return transaction'}

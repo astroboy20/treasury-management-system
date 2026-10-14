@@ -18,6 +18,7 @@ export const ROLE_PERMISSIONS = {
   TREASURY_OFFICER: [
     'create_transaction',
     'verify_signature',
+    'record_confirmation',
     'verify_investment',
     'prepare_voucher',
     'approve_treasury',
@@ -54,6 +55,7 @@ export const ROLE_PERMISSIONS = {
     'view_audit_history',
     'create_transaction',
     'verify_signature',
+    'record_confirmation',
     'verify_investment',
     'prepare_voucher',
     'approve_treasury',
@@ -90,13 +92,14 @@ export const ROLE_LABELS: Record<string, string> = {
 /**
  * Maps a transaction status to the role responsible for
  * the next action. Mirrors the PostgreSQL get_next_action_role() function.
+ * VOUCHER_PREPARED now routes to HEAD_TREASURY (not TREASURY_OFFICER).
  */
 export const STATUS_TO_OWNER: Record<string, string> = {
   INSTRUCTION_RECEIVED:   'Treasury Officer',
-  SIGNATURE_VERIFIED:     'Account Officer',
+  SIGNATURE_VERIFIED:     'Treasury Officer',
   CUSTOMER_CONFIRMED:     'Treasury Officer',
   INVESTMENT_VERIFIED:    'Treasury Officer',
-  VOUCHER_PREPARED:       'Treasury Officer',
+  VOUCHER_PREPARED:       'Treasury Officer',   // checker signs
   TREASURY_APPROVED:      'Head of Treasury',
   HEAD_TREASURY_APPROVED: 'MIS Officer',
   MIS_APPROVED:           'Audit Officer',
@@ -105,9 +108,6 @@ export const STATUS_TO_OWNER: Record<string, string> = {
   OPERATIONS_COMPLETED:   'Treasury Officer',
 }
 
-/**
- * Maps each approval stage to the role code that can act on it.
- */
 export const STAGE_TO_ROLE: Record<string, string> = {
   TREASURY:      'TREASURY_OFFICER',
   HEAD_TREASURY: 'HEAD_TREASURY',
@@ -116,10 +116,6 @@ export const STAGE_TO_ROLE: Record<string, string> = {
   MD:            'MD',
 }
 
-/**
- * Maps each approval stage to the transaction status required
- * before that stage can act.
- */
 export const STAGE_REQUIRED_STATUS: Record<string, string> = {
   TREASURY:      'VOUCHER_PREPARED',
   HEAD_TREASURY: 'TREASURY_APPROVED',

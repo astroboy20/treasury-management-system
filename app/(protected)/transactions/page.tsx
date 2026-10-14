@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowUpRight, Plus, SlidersHorizontal } from "lucide-react";
+
+export const dynamic = 'force-dynamic'
+
 import {
   getAuthenticatedUser,
   resolveUserRole,

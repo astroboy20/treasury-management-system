@@ -210,7 +210,6 @@ export default function Step2SignatureVerification({
 }: Step2SignatureVerificationProps) {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [documentUploaded, setDocumentUploaded] = useState(!!existingDocument);
 
   const {
     handleSubmit,
@@ -333,8 +332,8 @@ export default function Step2SignatureVerification({
           )}
         </dl>
 
-        {/* Mandate document upload — available to Treasury Officers even after verification (Req 27.1) */}
-        <div className="rounded-lg border border-border bg-muted/20 p-4">
+        {/* Mandate document upload — commented out, not needed in current flow */}
+        {/* <div className="rounded-lg border border-border bg-muted/20 p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Attach Mandate Document
           </p>
@@ -347,7 +346,7 @@ export default function Step2SignatureVerification({
             defaultDocumentType="MANDATE"
             existingDocument={existingDocument}
           />
-        </div>
+        </div> */}
       </div>
     );
   }
@@ -420,12 +419,7 @@ export default function Step2SignatureVerification({
         {/* Submit / permission notice */}
         {canAct ? (
           <div className="flex flex-col gap-1.5 items-end pt-1">
-            {!documentUploaded && (
-              <p className="text-xs text-destructive" role="alert">
-                A mandate document must be uploaded before submitting.
-              </p>
-            )}
-            <Button type="submit" disabled={submitting || !documentUploaded} size="sm">
+            <Button type="submit" disabled={submitting} size="sm">
               {submitting ? "Submitting…" : "Submit Verification"}
             </Button>
           </div>
@@ -436,8 +430,8 @@ export default function Step2SignatureVerification({
         )}
       </form>
 
-      {/* Mandate document upload (Req 27.1) — available while form is active */}
-      <div className="rounded-lg border border-border bg-muted/20 p-4">
+      {/* Mandate document upload — commented out, not needed in current flow */}
+      {/* <div className="rounded-lg border border-border bg-muted/20 p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Attach Mandate Document <span className="text-destructive">*</span>
         </p>
@@ -452,7 +446,7 @@ export default function Step2SignatureVerification({
           existingDocument={existingDocument}
           onUploadSuccess={() => setDocumentUploaded(true)}
         />
-      </div>
+      </div> */}
     </div>
   );
 }

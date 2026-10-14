@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { Loader2, Search, X } from 'lucide-react'
+import { Loader2, Plus, Search, Trash2, X } from 'lucide-react'
 
 import {
   CreateTransactionSchema,
   type CreateTransactionInput,
+  type PaymentInstruction,
   type TransactionType,
 } from '@/lib/schemas/transaction.schema'
 import { createTransactionAction, createReversalAction, searchTransactionsByReferenceAction } from '@/lib/actions/transaction.actions'
@@ -393,8 +394,25 @@ export default function NewTransactionForm({ customers }: Props) {
   const [investments, setInvestments] = useState<InvestmentOption[]>([])
   const [loadingInvestments, setLoadingInvestments] = useState(false)
 
-  // Internal/External toggle for THIRD_PARTY_PAYMENT (Req 21.1, 21.3)
-  const [isInternalTransferPayment, setIsInternalTransferPayment] = useState(false)
+  // Eazybankz data for the selected investment
+  const [eazybankzData, setEazybankzData] = useState<{
+    principal: string
+    availableAmount: string
+    outstandingBalance: string
+    accruedInterest: string
+    interestRate: string
+    effectiveDate: string
+    maturityDate: string
+    productType: string
+    status: string
+  } | null>(null)
+  const [loadingEazybankz, setLoadingEazybankz] = useState(false)
+
+  // Multi-account payment instructions for THIRD_PARTY_PAYMENT
+  // Each entry has its own internal/external toggle
+  const [paymentEntries, setPaymentEntries] = useState<PaymentInstruction[]>([
+    { isInternal: false },
+  ])
 
   // Reversal — selected original transaction state (Req 22.4, 25.1)
   const [originalTransactionId, setOriginalTransactionId] = useState('')
@@ -417,11 +435,12 @@ export default function NewTransactionForm({ customers }: Props) {
       requestedAmount: '',
       purpose: '',
       sourceInstructionType: undefined,
-      paymentInstruction: undefined,
+      paymentInstructions: undefined,
     },
   })
 
   const selectedCustomerId   = watch('customerId')
+  const selectedInvestmentId = watch('investmentId')
   const selectedType         = watch('transactionType')
   const selectedScenarioCode = watch('scenarioCode')
   const requestedPayoutValue = watch('requestedPayout')
@@ -439,6 +458,7 @@ export default function NewTransactionForm({ customers }: Props) {
     if (!selectedCustomerId) {
       setInvestments([])
       setValue('investmentId', undefined)
+      setEazybankzData(null)
       return
     }
 
@@ -448,16 +468,41 @@ export default function NewTransactionForm({ customers }: Props) {
       .then((data: InvestmentOption[]) => {
         setInvestments(data)
         setValue('investmentId', undefined)
+        setEazybankzData(null)
       })
       .catch(() => setInvestments([]))
       .finally(() => setLoadingInvestments(false))
   }, [selectedCustomerId, setValue])
 
-  // Clear payment instruction when type no longer requires it
+  // Show investment data when investment is selected
+  useEffect(() => {
+    if (!selectedInvestmentId) {
+      setEazybankzData(null)
+      return
+    }
+    const inv = investments.find((i) => i.id === selectedInvestmentId)
+    if (!inv) {
+      setEazybankzData(null)
+      return
+    }
+    setEazybankzData({
+      principal: inv.principal,
+      availableAmount: inv.principal,
+      outstandingBalance: inv.principal,
+      accruedInterest: '0',
+      interestRate: '0',
+      effectiveDate: '—',
+      maturityDate: '—',
+      productType: inv.product_type,
+      status: 'ACTIVE',
+    })
+    setLoadingEazybankz(false)
+  }, [selectedInvestmentId, investments])
+  // Clear payment instructions when type no longer requires them
   useEffect(() => {
     if (!isExternalPayment) {
-      setValue('paymentInstruction', undefined)
-      setIsInternalTransferPayment(false)
+      setValue('paymentInstructions', undefined)
+      setPaymentEntries([{ isInternal: false }])
     }
   }, [isExternalPayment, setValue])
 
@@ -485,6 +530,13 @@ export default function NewTransactionForm({ customers }: Props) {
       setOriginalTxError('')
     }
   }, [isReversal])
+
+  // Sync paymentEntries → react-hook-form value so Zod validation runs on submit
+  useEffect(() => {
+    if (isExternalPayment) {
+      setValue('paymentInstructions', paymentEntries, { shouldValidate: false })
+    }
+  }, [paymentEntries, isExternalPayment, setValue])
 
   const busy = isSubmitting || isPending
 
@@ -608,6 +660,56 @@ export default function NewTransactionForm({ customers }: Props) {
             </div>
             <FieldError message={errors.investmentId?.message} />
           </div>
+
+          {/* Eazybankz investment reference data — shown once investment is selected */}
+          {eazybankzData && (
+            <div className="sm:col-span-2 rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                  Investment Reference Data
+                </p>
+                {loadingEazybankz && (
+                  <Loader2 className="size-3.5 animate-spin text-primary" aria-hidden />
+                )}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Product Type</p>
+                  <p className="mt-0.5 text-sm text-foreground">{eazybankzData.productType}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Principal</p>
+                  <p className="mt-0.5 text-sm text-foreground">
+                    ₦{Number(eazybankzData.principal).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Available Amount</p>
+                  <p className="mt-0.5 text-sm font-semibold text-emerald-700">
+                    ₦{Number(eazybankzData.availableAmount).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Outstanding Balance</p>
+                  <p className="mt-0.5 text-sm text-foreground">
+                    ₦{Number(eazybankzData.outstandingBalance).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                {eazybankzData.effectiveDate && eazybankzData.effectiveDate !== '—' && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Effective Date</p>
+                    <p className="mt-0.5 text-sm text-foreground">{eazybankzData.effectiveDate}</p>
+                  </div>
+                )}
+                {eazybankzData.maturityDate && eazybankzData.maturityDate !== '—' && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Maturity Date</p>
+                    <p className="mt-0.5 text-sm text-foreground">{eazybankzData.maturityDate}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </fieldset>
 
@@ -900,187 +1002,216 @@ export default function NewTransactionForm({ customers }: Props) {
         </fieldset>
       )}
 
-      {/* ── Section: Payment Instruction — conditionally rendered for THIRD_PARTY_PAYMENT ── */}
+      {/* ── Section: Payment Instructions — conditionally rendered for THIRD_PARTY_PAYMENT ── */}
       {isExternalPayment && (
         <fieldset className="rounded-xl border border-border bg-background p-6">
           <legend className="px-1 text-sm font-semibold text-foreground">
-            {isInternalTransferPayment ? 'Internal Transfer — Intra-company transfer (no charge)' : 'External Payment Beneficiary'}
+            Payment Destinations
           </legend>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isInternalTransferPayment
-              ? 'Internal transfer — Transfer Charge: ₦0 (no charge for intra-company transfers)'
-              : 'Required for third-party external payments. All fields below are mandatory.'}
+            Add one or more beneficiary accounts the client wants the funds sent to.
           </p>
 
-          {/* Internal / External toggle (Req 21.1) */}
-          <div className="mt-4 flex items-center gap-3">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={!isInternalTransferPayment}
-              onClick={() => {
-                setIsInternalTransferPayment(false)
-                setValue('paymentInstruction.isInternal', false, { shouldValidate: true })
-                // Clear the internal-only field if switching back to external
-                setValue('paymentInstruction.accountNumber', '', { shouldValidate: false })
-              }}
-              className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
-                !isInternalTransferPayment
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-input bg-background text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted'
-              }`}
-            >
-              External Transfer
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={isInternalTransferPayment}
-              onClick={() => {
-                setIsInternalTransferPayment(true)
-                setValue('paymentInstruction.isInternal', true, { shouldValidate: true })
-                // Clear external-only fields when switching to internal
-                setValue('paymentInstruction.beneficiaryName', '', { shouldValidate: false })
-                setValue('paymentInstruction.bankName', '', { shouldValidate: false })
-                setValue('paymentInstruction.accountType', undefined, { shouldValidate: false })
-              }}
-              className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors ${
-                isInternalTransferPayment
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-input bg-background text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted'
-              }`}
-            >
-              Internal Transfer
-            </button>
+          <div className="mt-5 space-y-4">
+            {paymentEntries.map((entry, idx) => {
+              const isInternalEntry = entry.isInternal === true
+              const entryErrors = (errors.paymentInstructions as Record<string, unknown> | undefined)?.[idx] as Record<string, { message?: string }> | undefined
+
+              function updateEntry(patch: Partial<PaymentInstruction>) {
+                setPaymentEntries((prev) => prev.map((e, i) => i === idx ? { ...e, ...patch } : e))
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className="relative rounded-lg border border-border bg-muted/20 p-4"
+                >
+                  {/* Account header */}
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold text-foreground">
+                      Account {idx + 1}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      {/* Internal/External toggle per entry (Req 21.1) */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={!isInternalEntry}
+                          onClick={() => updateEntry({ isInternal: false, accountNumber: '', beneficiaryName: '', bankName: '', accountType: undefined })}
+                          className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors ${
+                            !isInternalEntry
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-input bg-background text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted'
+                          }`}
+                        >
+                          External
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={isInternalEntry}
+                          onClick={() => updateEntry({ isInternal: true, accountNumber: '', beneficiaryName: '', bankName: '', accountType: undefined })}
+                          className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors ${
+                            isInternalEntry
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-input bg-background text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted'
+                          }`}
+                        >
+                          Internal
+                        </button>
+                      </div>
+
+                      {/* Remove button — only if more than one entry */}
+                      {paymentEntries.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setPaymentEntries((prev) => prev.filter((_, i) => i !== idx))}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:border-destructive [@media(hover:hover)_and_(pointer:fine)]:hover:text-destructive"
+                          aria-label={`Remove account ${idx + 1}`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {isInternalEntry ? (
+                    /* Internal: only account number required (Req 21.1, 21.3) */
+                    <div>
+                      <label htmlFor={`pi-${idx}-accountNumber`} className="text-sm font-medium leading-none">
+                        Internal Account Number <span className="ml-0.5 text-destructive" aria-hidden>*</span>
+                      </label>
+                      <div className="mt-2">
+                        <input
+                          id={`pi-${idx}-accountNumber`}
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="Internal account number"
+                          value={entry.accountNumber ?? ''}
+                          onChange={(e) => updateEntry({ accountNumber: e.target.value })}
+                          className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                            entryErrors?.accountNumber ? 'border-destructive' : 'border-input'
+                          }`}
+                        />
+                      </div>
+                      {entryErrors?.accountNumber?.message && (
+                        <p className="mt-1.5 text-xs text-destructive" role="alert">{entryErrors.accountNumber.message}</p>
+                      )}
+                    </div>
+                  ) : (
+                    /* External: full fields required (Req 7.7, 36.1) */
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {/* Beneficiary name */}
+                      <div>
+                        <label htmlFor={`pi-${idx}-beneficiaryName`} className="text-sm font-medium leading-none">
+                          Beneficiary Name <span className="ml-0.5 text-destructive" aria-hidden>*</span>
+                        </label>
+                        <div className="mt-2">
+                          <input
+                            id={`pi-${idx}-beneficiaryName`}
+                            type="text"
+                            placeholder="Full legal name"
+                            value={entry.beneficiaryName ?? ''}
+                            onChange={(e) => updateEntry({ beneficiaryName: e.target.value })}
+                            className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                              entryErrors?.beneficiaryName ? 'border-destructive' : 'border-input'
+                            }`}
+                          />
+                        </div>
+                        {entryErrors?.beneficiaryName?.message && (
+                          <p className="mt-1.5 text-xs text-destructive" role="alert">{entryErrors.beneficiaryName.message}</p>
+                        )}
+                      </div>
+
+                      {/* Bank name */}
+                      <div>
+                        <label htmlFor={`pi-${idx}-bankName`} className="text-sm font-medium leading-none">
+                          Bank Name <span className="ml-0.5 text-destructive" aria-hidden>*</span>
+                        </label>
+                        <div className="mt-2">
+                          <input
+                            id={`pi-${idx}-bankName`}
+                            type="text"
+                            placeholder="e.g. First Bank"
+                            value={entry.bankName ?? ''}
+                            onChange={(e) => updateEntry({ bankName: e.target.value })}
+                            className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                              entryErrors?.bankName ? 'border-destructive' : 'border-input'
+                            }`}
+                          />
+                        </div>
+                        {entryErrors?.bankName?.message && (
+                          <p className="mt-1.5 text-xs text-destructive" role="alert">{entryErrors.bankName.message}</p>
+                        )}
+                      </div>
+
+                      {/* Account number */}
+                      <div>
+                        <label htmlFor={`pi-${idx}-accountNumber`} className="text-sm font-medium leading-none">
+                          Account Number <span className="ml-0.5 text-destructive" aria-hidden>*</span>
+                        </label>
+                        <div className="mt-2">
+                          <input
+                            id={`pi-${idx}-accountNumber`}
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="10-digit NUBAN"
+                            value={entry.accountNumber ?? ''}
+                            onChange={(e) => updateEntry({ accountNumber: e.target.value })}
+                            className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
+                              entryErrors?.accountNumber ? 'border-destructive' : 'border-input'
+                            }`}
+                          />
+                        </div>
+                        {entryErrors?.accountNumber?.message && (
+                          <p className="mt-1.5 text-xs text-destructive" role="alert">{entryErrors.accountNumber.message}</p>
+                        )}
+                      </div>
+
+                      {/* Account type */}
+                      <div>
+                        <label htmlFor={`pi-${idx}-accountType`} className="text-sm font-medium leading-none">
+                          Account Type
+                        </label>
+                        <div className="mt-2">
+                          <select
+                            id={`pi-${idx}-accountType`}
+                            value={entry.accountType ?? ''}
+                            onChange={(e) => updateEntry({ accountType: e.target.value as PaymentInstruction['accountType'] || undefined })}
+                            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30"
+                          >
+                            <option value="">Select account type…</option>
+                            {ACCOUNT_TYPE_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
-          <div className="mt-5 grid gap-5 sm:grid-cols-2">
-            {isInternalTransfer ? (
-              /* Internal: only account number required (Req 21.1, 21.3) */
-              <>
-                <div className="sm:col-span-2">
-                  <Label htmlFor="paymentInstruction.accountNumber" required>
-                    Internal Account Number
-                  </Label>
-                  <div className="mt-2">
-                    <input
-                      id="paymentInstruction.accountNumber"
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="Internal account number"
-                      {...register('paymentInstruction.accountNumber')}
-                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                        errors.paymentInstruction?.accountNumber ? 'border-destructive' : 'border-input'
-                      }`}
-                    />
-                  </div>
-                  <FieldError message={errors.paymentInstruction?.accountNumber?.message} />
-                </div>
-                {/* Hidden field — isInternal = true */}
-                <input
-                  type="hidden"
-                  {...register('paymentInstruction.isInternal')}
-                  value="true"
-                />
-              </>
-            ) : (
-              /* External: full 6 fields required (Req 7.7, 36.1) */
-              <>
-                {/* Beneficiary name */}
-                <div>
-                  <Label htmlFor="paymentInstruction.beneficiaryName" required>
-                    Beneficiary Name
-                  </Label>
-                  <div className="mt-2">
-                    <input
-                      id="paymentInstruction.beneficiaryName"
-                      type="text"
-                      placeholder="Full legal name"
-                      {...register('paymentInstruction.beneficiaryName')}
-                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                        errors.paymentInstruction?.beneficiaryName ? 'border-destructive' : 'border-input'
-                      }`}
-                    />
-                  </div>
-                  <FieldError message={errors.paymentInstruction?.beneficiaryName?.message} />
-                </div>
+          {/* Add another account button */}
+          <button
+            type="button"
+            onClick={() => setPaymentEntries((prev) => [...prev, { isInternal: false }])}
+            className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg border border-dashed border-border px-4 text-sm font-medium text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary [@media(hover:hover)_and_(pointer:fine)]:hover:text-primary"
+          >
+            <Plus className="size-3.5" />
+            Add another account
+          </button>
 
-                {/* Bank name */}
-                <div>
-                  <Label htmlFor="paymentInstruction.bankName" required>
-                    Bank Name
-                  </Label>
-                  <div className="mt-2">
-                    <input
-                      id="paymentInstruction.bankName"
-                      type="text"
-                      placeholder="e.g. First Bank"
-                      {...register('paymentInstruction.bankName')}
-                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                        errors.paymentInstruction?.bankName ? 'border-destructive' : 'border-input'
-                      }`}
-                    />
-                  </div>
-                  <FieldError message={errors.paymentInstruction?.bankName?.message} />
-                </div>
-
-                {/* Account number */}
-                <div>
-                  <Label htmlFor="paymentInstruction.accountNumber" required>
-                    Account Number
-                  </Label>
-                  <div className="mt-2">
-                    <input
-                      id="paymentInstruction.accountNumber"
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="10-digit NUBAN"
-                      {...register('paymentInstruction.accountNumber')}
-                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm tabular-nums outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                        errors.paymentInstruction?.accountNumber ? 'border-destructive' : 'border-input'
-                      }`}
-                    />
-                  </div>
-                  <FieldError message={errors.paymentInstruction?.accountNumber?.message} />
-                </div>
-
-                {/* Account type */}
-                <div>
-                  <Label htmlFor="paymentInstruction.accountType" required>
-                    Account Type
-                  </Label>
-                  <div className="mt-2">
-                    <select
-                      id="paymentInstruction.accountType"
-                      {...register('paymentInstruction.accountType')}
-                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/30 ${
-                        errors.paymentInstruction?.accountType ? 'border-destructive' : 'border-input'
-                      }`}
-                    >
-                      <option value="">Select account type…</option>
-                      {ACCOUNT_TYPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <FieldError message={errors.paymentInstruction?.accountType?.message} />
-                </div>
-
-                {/* Hidden — is_internal = false for external THIRD_PARTY_PAYMENT */}
-                <input
-                  type="hidden"
-                  {...register('paymentInstruction.isInternal')}
-                  value="false"
-                />
-              </>
-            )}
-          </div>
-
-          {/* Top-level payment instruction error (e.g. entire block missing) */}
-          {errors.paymentInstruction?.root?.message && (
-            <FieldError message={errors.paymentInstruction.root.message} />
+          {/* Top-level array error (e.g. entire block missing) */}
+          {errors.paymentInstructions?.message && (
+            <p className="mt-2 text-xs text-destructive" role="alert">
+              {errors.paymentInstructions.message as string}
+            </p>
           )}
         </fieldset>
       )}

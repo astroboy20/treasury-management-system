@@ -358,7 +358,10 @@ export function SavingsFundsOutVoucher({ voucher, transactionType }: { voucher: 
       {voucher.payment_instruction && (
         <>
           <Separator />
-          <PaymentInstructionBlock instruction={voucher.payment_instruction} />
+          <PaymentInstructionBlock
+            instruction={voucher.payment_instruction}
+            transactionType={transactionType}
+          />
         </>
       )}
     </div>

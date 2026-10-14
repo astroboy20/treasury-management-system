@@ -21,6 +21,10 @@ import { eazybankzAdapter, EazybankzError } from "@/lib/services/eazybankz";
 import type { StepMeta } from "@/lib/services/workflow.service";
 import type { TransactionWorkspace } from "@/lib/services/transaction.service";
 
+// Force dynamic rendering — transaction status changes frequently and must
+// always reflect the latest DB state (e.g. RETURNED after an approver recalls).
+export const dynamic = 'force-dynamic'
+
 // ─── Beneficiary requirement check ───────────────────────────────────────────
 // Defined here (server component) to avoid importing a Set from a client module
 // across the server/client boundary, which causes serialisation loss of .has().
@@ -37,12 +41,8 @@ function requiresBeneficiary(transactionType: string): boolean {
 // ─── Step label map ───────────────────────────────────────────────────────────
 
 const STEP_LABELS: Record<number, string> = {
-  1: "Instruction",
-  2: "Signature Verification",
-  3: "Customer Confirmation",
-  4: "Investment Verification",
-  5: "Voucher Preparation",
-  6: "Approval Chain",
+  1: "Instruction & Verification",
+  2: "Approval Chain",
 };
 
 // ─── StepSection wrapper ──────────────────────────────────────────────────────
@@ -195,7 +195,188 @@ function ChevronIcon() {
   );
 }
 
-// ─── Step content renderer ────────────────────────────────────────────────────
+// ─── Verification section — steps 1–5 as one flat section ────────────────────
+
+interface VerificationSectionProps {
+  steps: StepMeta[];
+  workspace: TransactionWorkspace;
+  userRole: string | null;
+  userId: string | null;
+  eazybankzData: import("@/lib/services/eazybankz").EazybankzInvestment | null;
+}
+
+/**
+ * Renders the instruction + all verification/voucher steps as a single
+ * collapsible section managed entirely by the Treasury Maker.
+ * No sub-headings — all content flows as one continuous panel.
+ */
+function VerificationSection({
+  steps,
+  workspace,
+  userRole,
+  eazybankzData,
+}: VerificationSectionProps) {
+  // steps[0] is "Instruction & Verification" — the merged treasury-maker section
+  const step = steps[0];
+  const sectionState = step?.state ?? "locked";
+  const lockedReason = step?.lockedReason;
+
+  const headerClasses = [
+    "flex w-full items-center gap-3 px-5 py-4 sm:px-6 text-left",
+    sectionState === "completed"
+      ? "text-emerald-700"
+      : sectionState === "active"
+      ? "text-foreground"
+      : "text-muted-foreground",
+  ].join(" ");
+
+  const borderClasses = [
+    "rounded-xl border",
+    sectionState === "active" ? "border-primary/30 shadow-sm" : "border-border",
+    sectionState === "locked" ? "bg-muted/30" : "bg-background",
+  ].join(" ");
+
+  const badge = sectionState === "completed" ? (
+    <span
+      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white text-xs font-semibold"
+      aria-hidden
+    >
+      ✓
+    </span>
+  ) : sectionState === "active" ? (
+    <span
+      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold"
+      aria-hidden
+    >
+      1
+    </span>
+  ) : (
+    <span
+      className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground text-xs"
+      aria-hidden
+    >
+      1
+    </span>
+  );
+
+  const isTreasuryMaker = userRole === "TREASURY_OFFICER" || userRole === "ADMIN";
+
+  // Render the full flat content of all steps 1–5 with no sub-headings
+  const flatContent = (
+    <div className="border-t border-border px-5 py-5 sm:px-6 space-y-8">
+      {/* Instruction details */}
+      <Step1Instruction
+        transaction={workspace.transaction}
+        customer={workspace.customer}
+        createdBy={workspace.createdBy}
+        canEdit={isTreasuryMaker}
+        paymentInstructions={workspace.paymentInstructions}
+        eazybankzData={eazybankzData}
+        investment={workspace.investment}
+      />
+
+      {/* Signature verification form */}
+      <Step2SignatureVerification
+        transactionId={workspace.transaction.id}
+        signatureVerification={workspace.signatureVerification}
+        canAct={isTreasuryMaker}
+        existingDocument={
+          workspace.documents.find((d) => d.document_type === "MANDATE") ?? null
+        }
+      />
+
+      {/* Customer confirmation form */}
+      <Step3CustomerConfirmation
+        transactionId={workspace.transaction.id}
+        officerName={workspace.createdBy?.full_name ?? "Treasury Officer"}
+        requiresBeneficiary={requiresBeneficiary(workspace.transaction.transaction_type)}
+        customerConfirmation={workspace.customerConfirmation}
+        canAct={isTreasuryMaker}
+      />
+
+      {/* Investment verification form */}
+      <Step4InvestmentVerification
+        transactionId={workspace.transaction.id}
+        eazybankzData={eazybankzData}
+        investmentVerification={workspace.investmentVerification}
+        canAct={isTreasuryMaker}
+        existingDocument={
+          workspace.documents.find((d) => d.document_type === "EVIDENCE") ?? null
+        }
+      />
+
+      {/* Voucher preparation form */}
+      <Step5VoucherGeneration
+        transactionId={workspace.transaction.id}
+        transactionType={workspace.transaction.transaction_type}
+        transactionStatus={workspace.transaction.status}
+        scenarioCode={workspace.transaction.scenario_code}
+        investmentVerification={workspace.investmentVerification}
+        voucher={workspace.voucher}
+        canAct={isTreasuryMaker}
+        existingPaymentInstruction={workspace.paymentInstructions?.[0] ?? null}
+        existingDocument={
+          workspace.documents.find((d) => d.document_type === "SIGNED_FORM") ?? null
+        }
+      />
+    </div>
+  );
+
+  return (
+    <section aria-label="Instruction, Verification & Voucher" className={borderClasses}>
+      {sectionState === "completed" ? (
+        <details>
+          <summary
+            className={`${headerClasses} cursor-pointer list-none select-none marker:hidden`}
+          >
+            {badge}
+            <span className="flex-1 text-sm font-medium">Instruction &amp; Verification</span>
+            <span className="text-xs text-muted-foreground">Completed</span>
+            <svg
+              className="size-4 shrink-0 transition-transform duration-150 [[open]_&]:rotate-180"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </summary>
+          {flatContent}
+        </details>
+      ) : sectionState === "active" ? (
+        <>
+          <div className={`${headerClasses} cursor-default`}>
+            {badge}
+            <span className="flex-1 text-sm font-medium">Instruction &amp; Verification</span>
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              In progress
+            </span>
+          </div>
+          {flatContent}
+        </>
+      ) : (
+        <>
+          <div className={`${headerClasses} cursor-default`}>
+            {badge}
+            <span className="flex-1 text-sm font-medium">Instruction &amp; Verification</span>
+            <span className="text-xs text-muted-foreground">Locked</span>
+          </div>
+          {lockedReason && (
+            <div className="border-t border-border/50 px-5 py-3 sm:px-6">
+              <p className="text-xs text-muted-foreground italic">
+                {lockedReason}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// ─── Step content renderer (approval chain — step 2) ─────────────────────────
 
 interface StepContentProps {
   step: StepMeta;
@@ -208,92 +389,20 @@ interface StepContentProps {
 function StepContent({
   step,
   workspace,
-  userRole,
   userId,
-  eazybankzData,
+  userRole,
 }: StepContentProps) {
-  switch (step.id) {
-    case 1:
-      return (
-        <Step1Instruction
-          transaction={workspace.transaction}
-          customer={workspace.customer}
-          createdBy={workspace.createdBy}
-          canUpload={
-            userRole !== null &&
-            userRole !== 'CUSTOMER' &&
-            userRole !== undefined
-          }
-          existingDocument={
-            workspace.documents.find((d) => d.document_type === 'INSTRUCTION') ?? null
-          }
-        />
-      );
-    case 2:
-      return (
-        <Step2SignatureVerification
-          transactionId={workspace.transaction.id}
-          signatureVerification={workspace.signatureVerification}
-          canAct={userRole === "TREASURY_OFFICER" || userRole === "ADMIN"}
-          existingDocument={
-            workspace.documents.find((d) => d.document_type === 'MANDATE') ?? null
-          }
-        />
-      );
-    case 3:
-      return (
-        <Step3CustomerConfirmation
-          transactionId={workspace.transaction.id}
-          officerName={workspace.createdBy?.full_name ?? "Account Officer"}
-          customerPhone={workspace.customer?.registered_phone ?? null}
-          requiresBeneficiary={requiresBeneficiary(
-            workspace.transaction.transaction_type
-          )}
-          customerConfirmation={workspace.customerConfirmation}
-          canAct={userRole === "ACCOUNT_OFFICER" || userRole === "ADMIN"}
-        />
-      );
-    case 4:
-      return (
-        <Step4InvestmentVerification
-          transactionId={workspace.transaction.id}
-          eazybankzData={eazybankzData}
-          investmentVerification={workspace.investmentVerification}
-          canAct={userRole === "TREASURY_OFFICER" || userRole === "ADMIN"}
-          existingDocument={
-            workspace.documents.find((d) => d.document_type === 'EVIDENCE') ?? null
-          }
-        />
-      );
-    case 5:
-      return (
-        <Step5VoucherGeneration
-          transactionId={workspace.transaction.id}
-          transactionType={workspace.transaction.transaction_type}
-          scenarioCode={workspace.transaction.scenario_code}
-          investmentVerification={workspace.investmentVerification}
-          voucher={workspace.voucher}
-          canAct={userRole === "TREASURY_OFFICER" || userRole === "ADMIN"}
-          existingPaymentInstruction={workspace.paymentInstruction}
-          existingDocument={
-            workspace.documents.find((d) => d.document_type === 'SIGNED_FORM') ?? null
-          }
-        />
-      );
-    case 6:
-      return (
-        <Step6ApprovalChain
-          transactionId={workspace.transaction.id}
-          transactionStatus={workspace.transaction.status}
-          transactionCreatedBy={workspace.transaction.created_by}
-          approvals={workspace.approvals}
-          currentUserId={userId ?? ""}
-          currentUserRole={userRole}
-        />
-      );
-    default:
-      return null;
-  }
+  // step.id === 2 → Approval Chain
+  return (
+    <Step6ApprovalChain
+      transactionId={workspace.transaction.id}
+      transactionStatus={workspace.transaction.status}
+      transactionCreatedBy={workspace.transaction.created_by}
+      approvals={workspace.approvals}
+      currentUserId={userId ?? ""}
+      currentUserRole={userRole}
+    />
+  );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -307,7 +416,6 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
   // Load workspace data server-side
   const result = await getTransactionWorkspaceAction(id);
 
-  console.log(id,"is")
 
   if (!result.success) {
     if (result.error === 'Not authenticated.') {
@@ -373,7 +481,17 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
           className="flex flex-1 min-w-0 flex-col gap-4"
           aria-label="Transaction workspace"
         >
-          {steps.map((step) => (
+          {/* Steps 1–5 — Instruction, Verification & Voucher (one section, treasury maker) */}
+          <VerificationSection
+            steps={steps}
+            workspace={workspace}
+            userRole={userRole}
+            userId={userId}
+            eazybankzData={eazybankzData}
+          />
+
+          {/* Step 2 — Approval Chain (Head Treasury → MIS → Audit → MD) */}
+          {steps.slice(1).map((step) => (
             <StepSection key={step.id} step={step}>
               <StepContent
                 step={step}
@@ -496,7 +614,6 @@ export default async function TransactionWorkspacePage({ params }: PageProps) {
             transaction={workspace.transaction}
             approvals={workspace.approvals}
             documents={workspace.documents}
-            userRole={userRole}
           />
         </div>
       </div>

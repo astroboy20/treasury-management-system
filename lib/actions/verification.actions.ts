@@ -5,11 +5,13 @@ import { createClient } from '@/lib/supabase/server'
 import { getAuthenticatedUser, resolveUserRole } from '@/lib/services/auth.service'
 import {
   SignatureVerificationSchema,
-  type SignatureVerificationInput,
   CustomerConfirmationSchema,
-  type CustomerConfirmationInput,
   InvestmentVerificationSchema,
-  type InvestmentVerificationInput,
+} from '@/lib/schemas/verification.schema'
+import type {
+  SignatureVerificationInput,
+  CustomerConfirmationInput,
+  InvestmentVerificationInput,
 } from '@/lib/schemas/verification.schema'
 import type { ActionResult } from '@/lib/actions/transaction.actions'
 
@@ -118,11 +120,11 @@ export async function recordCustomerConfirmationAction(
     return { success: false, error: 'No role assigned to your account.' }
   }
 
-  // 4. Enforce ACCOUNT_OFFICER permission (Req 9.6)
-  if (role !== 'ACCOUNT_OFFICER' && role !== 'ADMIN') {
+  // 4. Enforce TREASURY_OFFICER or ACCOUNT_OFFICER permission (Req 9.6)
+  if (role !== 'TREASURY_OFFICER' && role !== 'ACCOUNT_OFFICER' && role !== 'ADMIN') {
     return {
       success: false,
-      error: 'Only an Account Officer can record customer confirmations.',
+      error: 'Only a Treasury Officer or Account Officer can record customer confirmations.',
     }
   }
 
