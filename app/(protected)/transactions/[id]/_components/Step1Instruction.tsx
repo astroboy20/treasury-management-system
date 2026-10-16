@@ -46,6 +46,8 @@ interface Step1InstructionProps {
   canEdit?: boolean
   /** Whether the current user can upload documents */
   canUpload?: boolean
+  /** Whether the current user can replace the source document (must be the creator) */
+  canReplace?: boolean
   /** Previously uploaded instruction document, if any */
   existingDocument?: UploadedDocument | null
   /** Payment instructions (one-to-many) */
@@ -249,7 +251,7 @@ export default function Step1Instruction({
   createdBy,
   canEdit,
   canUpload,
-  existingDocument,
+  canReplace,
   paymentInstructions,
   eazybankzData,
   investment,
@@ -449,7 +451,7 @@ export default function Step1Instruction({
         <div className="flex items-center gap-2">
           <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Source Document
+            Source Document <span className="text-destructive" aria-hidden>*</span>
           </p>
         </div>
 
@@ -457,7 +459,9 @@ export default function Step1Instruction({
           <DocumentUpload
             transactionId={transaction.id}
             defaultDocumentType="INSTRUCTION"
+            required={true}
             existingDocument={sourceDocument ?? null}
+            canReplace={canReplace}
           />
         ) : (
           <p className="text-xs text-muted-foreground italic">No source document attached.</p>

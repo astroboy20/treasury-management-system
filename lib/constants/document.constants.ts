@@ -4,11 +4,17 @@
 // This file must NOT have "use server" or "use client" — it is a plain module.
 
 /** Accepted MIME types (Req 27.2) */
-export const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const
+export const ALLOWED_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'application/msword',                                                          // .doc
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',    // .docx
+] as const
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number]
 
 /** Human-readable label used in error messages */
-export const ALLOWED_FILE_TYPES_LABEL = 'PDF, JPG, or PNG'
+export const ALLOWED_FILE_TYPES_LABEL = 'PDF, JPG, PNG, DOC, or DOCX'
 
 /** Maximum file size: 10 MB in bytes (Req 27.2) */
 export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024

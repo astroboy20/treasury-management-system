@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useId } from 'react'
+import { useState, useTransition, useId, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -28,6 +28,7 @@ import { uploadDocumentAction } from '@/lib/actions/document.actions'
 import { ALLOWED_MIME_TYPES, ALLOWED_FILE_TYPES_LABEL, MAX_FILE_SIZE_BYTES } from '@/lib/constants/document.constants'
 import { useNetworkStatus } from '@/lib/hooks/useNetworkStatus'
 import { enqueue } from '@/lib/offline/queue'
+import { saveCustomerCache, loadCustomerCache } from '@/lib/offline/customer-cache'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +208,21 @@ function validateSourceDocumentFile(file: File): string | null {
   return null
 }
 
+// ─── Field error helper ───────────────────────────────────────────────────────
+
+function RowFieldError({ message }: { message?: string }) {
+  if (!message) return null
+  // Zod enum errors list all valid values verbosely — replace with a short message.
+  const display = /^Invalid option: expected one of/i.test(message)
+    ? 'Please select a valid option.'
+    : message
+  return (
+    <p className="mt-1 break-words text-[11px] text-destructive" role="alert">
+      {display}
+    </p>
+  )
+}
+
 // ─── CustomerSelect — inline searchable select ───────────────────────────────
 
 function CustomerSelect({
@@ -267,7 +283,7 @@ function SourceDocumentUpload({
     <div className="rounded-lg border border-dashed border-border bg-muted/10 p-3 space-y-2">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         Source Document{' '}
-        <span className="normal-case font-normal text-muted-foreground/70">(optional)</span>
+        <span className="text-destructive" aria-hidden>*</span>
       </p>
 
       {file ? (
@@ -444,9 +460,7 @@ function RowCard({
             onChange={handleCustomerChange}
             error={row.errors.customerId}
           />
-          {row.errors.customerId && (
-            <p className="mt-1 text-[11px] text-destructive">{row.errors.customerId}</p>
-          )}
+          <RowFieldError message={row.errors.customerId} />
         </div>
 
         {/* Investment */}
@@ -514,9 +528,7 @@ function RowCard({
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
-          {row.errors.transactionType && (
-            <p className="mt-1 text-[11px] text-destructive">{row.errors.transactionType}</p>
-          )}
+          <RowFieldError message={row.errors.transactionType} />
         </div>
 
         {/* Scenario code — only when required */}
@@ -536,9 +548,7 @@ function RowCard({
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-            {row.errors.scenarioCode && (
-              <p className="mt-1 text-[11px] text-destructive">{row.errors.scenarioCode}</p>
-            )}
+            <RowFieldError message={row.errors.scenarioCode} />
           </div>
         )}
 
@@ -557,9 +567,7 @@ function RowCard({
               onChange={(e) => onUpdate({ requestedPayout: e.target.value })}
               className={fieldCls(row.errors.requestedPayout)}
             />
-            {row.errors.requestedPayout && (
-              <p className="mt-1 text-[11px] text-destructive">{row.errors.requestedPayout}</p>
-            )}
+            <RowFieldError message={row.errors.requestedPayout} />
           </div>
         )}
 
@@ -741,11 +749,12 @@ function RowCard({
       <SourceDocumentUpload
         rowId={row.id}
         file={row.sourceDocument}
-        fileError={row.sourceDocumentError}
+        fileError={row.sourceDocumentError ?? row.errors.general ?? null}
         onFileChange={(file) =>
           onUpdate({
             sourceDocument: file,
             sourceDocumentError: file ? validateSourceDocumentFile(file) : null,
+            errors: { ...row.errors, general: undefined },
           })
         }
       />
@@ -870,13 +879,34 @@ function ResultsSummary({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BatchTransactionForm({ customers }: BatchTransactionFormProps) {
+export default function BatchTransactionForm({ customers: serverCustomers }: BatchTransactionFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const formId = useId()
   // undefined = not yet hydrated → treat as online to avoid flicker
   const networkStatus = useNetworkStatus()
   const isOnline = networkStatus !== false
+
+  // ── Customer list ─────────────────────────────────────────────────────────
+  // Lazy initialiser: use serverCustomers if available (online), otherwise
+  // fall back to localStorage cache (offline). Runs only once on mount.
+  const [customers, setCustomers] = useState<CustomerOption[]>(() => {
+    if (serverCustomers.length > 0) return serverCustomers
+    return loadCustomerCache()
+  })
+
+  // Persist a fresh list whenever the server sends one (online path).
+  // useRef tracks whether we've already saved this exact prop value so the
+  // effect only fires once per page load, not on every render.
+  const savedRef = useRef(false)
+  useEffect(() => {
+    if (serverCustomers.length > 0 && !savedRef.current) {
+      savedRef.current = true
+      saveCustomerCache(serverCustomers)
+      // Also update state in case the lazy init ran before serverCustomers arrived
+      setCustomers(serverCustomers)
+    }
+  }, [serverCustomers])
 
   // Row list — starts with one empty row
   const [rows, setRows] = useState<RowState[]>([makeEmptyRow(uid())])
@@ -945,18 +975,27 @@ export default function BatchTransactionForm({ customers }: BatchTransactionForm
       }
 
       const parsed = CreateTransactionSchema.safeParse(input)
-      if (parsed.success) {
-        return { ...row, errors: {} }
-      }
-
-      allValid = false
       const errs: RowState['errors'] = {}
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0] as keyof CreateTransactionInput | undefined
-        if (field && !errs[field]) {
-          errs[field] = issue.message
+
+      if (!parsed.success) {
+        allValid = false
+        for (const issue of parsed.error.issues) {
+          const field = issue.path[0] as keyof CreateTransactionInput | undefined
+          if (field && !errs[field]) {
+            errs[field] = issue.message
+          }
         }
       }
+
+      // Source document is required
+      if (!row.sourceDocument) {
+        allValid = false
+        errs.general = 'Source document is required.'
+      } else if (row.sourceDocumentError) {
+        allValid = false
+        errs.general = row.sourceDocumentError
+      }
+
       return { ...row, errors: errs }
     })
 

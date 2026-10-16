@@ -208,6 +208,7 @@ function VerificationSection({
   steps,
   workspace,
   userRole,
+  userId,
   eazybankzData,
 }: VerificationSectionProps) {
   // steps[0] is "Instruction & Verification" — the merged treasury-maker section
@@ -270,6 +271,7 @@ function VerificationSection({
         createdBy={workspace.createdBy}
         canEdit={isTreasuryMaker}
         canUpload={isTreasuryMaker}
+        canReplace={isTreasuryMaker && userId === workspace.transaction.created_by}
         paymentInstructions={workspace.paymentInstructions}
         eazybankzData={eazybankzData}
         investment={workspace.investment}

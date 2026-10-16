@@ -180,7 +180,7 @@ export default function AppShell({ user, profile, role, initialNotifications, in
       )}
 
       {/* ── Main content ── */}
-      <section className="lg:pl-64">
+      <section className="lg:pl-64 overflow-x-hidden">
         {/* Top header */}
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border bg-background/95 px-5 backdrop-blur-sm sm:px-8">
           {/* Mobile menu button */}
@@ -222,7 +222,7 @@ export default function AppShell({ user, profile, role, initialNotifications, in
         <OfflineBanner />
 
         {/* Page content */}
-        <div>{children}</div>
+        <div className="overflow-x-hidden">{children}</div>
       </section>
     </main>
   )

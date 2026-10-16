@@ -17,17 +17,24 @@
  * online event inside useOfflineSync.ts.
  */
 
-const SHELL_CACHE  = 'treasury-shell-v1'
-const ASSET_CACHE  = 'treasury-assets-v1'
-const SHELL_URL    = '/'
+const SHELL_CACHE  = 'treasury-shell-v2'
+const ASSET_CACHE  = 'treasury-assets-v2'
+
+// Pages to pre-cache so they load while offline.
+// The app shell (/) covers all SSR pages via the navigation fallback.
+// We also pre-cache the batch transaction page since it's the main
+// data-entry point officers use.
+const PRECACHE_URLS = [
+  '/',
+  '/transactions/new/batch',
+]
 
 // ─── Install — pre-cache the app shell ───────────────────────────────────────
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) => cache.add(SHELL_URL))
+    caches.open(SHELL_CACHE).then((cache) => cache.addAll(PRECACHE_URLS))
   )
-  // Take over immediately without waiting for old tabs to close
   self.skipWaiting()
 })
 
@@ -65,24 +72,25 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/_next/webpack-hmr')) return
   if (url.pathname.startsWith('/__nextjs')) return
 
-  // 4. Navigation requests (HTML pages) — network-first, fall back to shell
+  // 4. Navigation requests (HTML pages) — network-first, fall back to cached shell
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          // Cache a fresh copy of the shell on every successful navigation
+          // Cache a fresh copy of this page on every successful navigation
           if (response.ok) {
             const clone = response.clone()
-            caches.open(SHELL_CACHE).then((cache) => cache.put(SHELL_URL, clone))
+            caches.open(SHELL_CACHE).then((cache) => cache.put(request.url, clone))
           }
           return response
         })
-        .catch(() =>
-          // Network failed — serve the cached shell so React boots offline
-          caches.match(SHELL_URL).then(
-            (cached) => cached ?? new Response('Offline', { status: 503 })
-          )
-        )
+        .catch(async () => {
+          // Network failed — try an exact match first, then fall back to '/'
+          const exact = await caches.match(request.url)
+          if (exact) return exact
+          const shell = await caches.match('/')
+          return shell ?? new Response('Offline', { status: 503 })
+        })
     )
     return
   }

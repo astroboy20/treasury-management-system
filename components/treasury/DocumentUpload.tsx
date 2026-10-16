@@ -42,6 +42,12 @@ interface DocumentUploadProps {
    */
   existingDocument?: UploadedDocument | null
   /**
+   * When false (default when existingDocument is present), hides the replace
+   * upload zone. Only the creator of the transaction should be able to replace
+   * the source document after submission.
+   */
+  canReplace?: boolean
+  /**
    * Called after a successful upload so the parent can update its gate state.
    */
   onUploadSuccess?: (documentId: string) => void
@@ -101,6 +107,7 @@ export function DocumentUpload({
   defaultDocumentType,
   required = false,
   existingDocument = null,
+  canReplace = false,
   onUploadSuccess,
 }: DocumentUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -256,7 +263,9 @@ export function DocumentUpload({
 
       {/* Upload label — with required indicator when needed */}
       {existingDocument ? (
-        <p className="text-xs font-medium text-muted-foreground">Replace document</p>
+        canReplace ? (
+          <p className="text-xs font-medium text-muted-foreground">Replace document</p>
+        ) : null
       ) : (
         <div className="flex flex-col gap-1.5">
           <p className="text-xs font-medium text-muted-foreground">
@@ -272,7 +281,7 @@ export function DocumentUpload({
       )}
 
       {/* Document type selector — hidden when type is pre-set by the parent */}
-      {!defaultDocumentType && (
+      {(!existingDocument || canReplace) && !defaultDocumentType && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={docTypeSelectId} className="text-xs font-medium text-muted-foreground">
             Document Type
@@ -301,92 +310,96 @@ export function DocumentUpload({
       )}
 
       {/* Inline validation alert (Req 27.2) */}
-      {validationError && (
+      {(!existingDocument || canReplace) && validationError && (
         <Alert variant="destructive" className="py-2">
           <AlertCircle className="size-3.5" aria-hidden />
           <AlertDescription className="text-xs">{validationError}</AlertDescription>
         </Alert>
       )}
 
-      {/* Drop zone / file picker */}
-      {selectedFile ? (
-        /* Selected file preview */
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
-          <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-            {selectedFile.name}
-          </span>
-          <span className="shrink-0 text-[0.65rem] text-muted-foreground">
-            {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB
-          </span>
-          {!isPending && (
-            <button
-              type="button"
-              onClick={handleClearFile}
-              className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`Remove ${selectedFile.name}`}
-            >
-              <X className="size-3" aria-hidden />
-            </button>
-          )}
-        </div>
-      ) : (
-        /* Drop target */
-        <label
-          htmlFor={fileInputId}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          className={[
-            'flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed',
-            'px-4 py-5 text-center transition-colors duration-150',
-            isDragActive
-              ? 'border-primary/70 bg-primary/5'
-              : 'border-border bg-muted/20 [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary/50 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
-            isPending ? 'pointer-events-none opacity-50' : '',
-          ].join(' ')}
-        >
-          <Upload className="size-5 text-muted-foreground" aria-hidden />
-          <span className="text-xs font-medium text-muted-foreground">
-            Click to browse or drop a file here
-          </span>
-          <span className="text-[0.65rem] text-muted-foreground">
-            {ALLOWED_FILE_TYPES_LABEL} · max 10 MB
-          </span>
-          <input
-            ref={fileInputRef}
-            id={fileInputId}
-            type="file"
-            className="sr-only"
-            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-            onChange={handleFileChange}
-            disabled={isPending}
-            aria-label="Upload document"
-          />
-        </label>
+      {/* Drop zone / file picker — only shown when no existing doc, or creator is replacing */}
+      {(!existingDocument || canReplace) && (
+        selectedFile ? (
+          /* Selected file preview */
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+            <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+              {selectedFile.name}
+            </span>
+            <span className="shrink-0 text-[0.65rem] text-muted-foreground">
+              {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB
+            </span>
+            {!isPending && (
+              <button
+                type="button"
+                onClick={handleClearFile}
+                className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Remove ${selectedFile.name}`}
+              >
+                <X className="size-3" aria-hidden />
+              </button>
+            )}
+          </div>
+        ) : (
+          /* Drop target */
+          <label
+            htmlFor={fileInputId}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            className={[
+              'flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed',
+              'px-4 py-5 text-center transition-colors duration-150',
+              isDragActive
+                ? 'border-primary/70 bg-primary/5'
+                : 'border-border bg-muted/20 [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary/50 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
+              isPending ? 'pointer-events-none opacity-50' : '',
+            ].join(' ')}
+          >
+            <Upload className="size-5 text-muted-foreground" aria-hidden />
+            <span className="text-xs font-medium text-muted-foreground">
+              Click to browse or drop a file here
+            </span>
+            <span className="text-[0.65rem] text-muted-foreground">
+              {ALLOWED_FILE_TYPES_LABEL} · max 10 MB
+            </span>
+            <input
+              ref={fileInputRef}
+              id={fileInputId}
+              type="file"
+              className="sr-only"
+              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,application/pdf,image/jpeg,image/png,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={handleFileChange}
+              disabled={isPending}
+              aria-label="Upload document"
+            />
+          </label>
+        )
       )}
 
-      {/* Upload button */}
-      <Button
-        type="button"
-        size="sm"
-        onClick={handleUpload}
-        disabled={!canUpload}
-        className="w-full text-xs"
-        aria-label={selectedFile ? `Upload ${selectedFile.name}` : 'Upload document'}
-      >
-        {isPending ? (
-          <>
-            <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />
-            Uploading…
-          </>
-        ) : (
-          <>
-            <Upload className="mr-1.5 size-3.5" aria-hidden />
-            Upload Document
-          </>
-        )}
-      </Button>
+      {/* Upload button — only shown when upload zone is visible */}
+      {(!existingDocument || canReplace) && (
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleUpload}
+          disabled={!canUpload}
+          className="w-full text-xs"
+          aria-label={selectedFile ? `Upload ${selectedFile.name}` : 'Upload document'}
+        >
+          {isPending ? (
+            <>
+              <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              Uploading…
+            </>
+          ) : (
+            <>
+              <Upload className="mr-1.5 size-3.5" aria-hidden />
+              Upload Document
+            </>
+          )}
+        </Button>
+      )}
 
     </div>
   )

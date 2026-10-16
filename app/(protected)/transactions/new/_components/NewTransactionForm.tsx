@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { Loader2, Plus, Search, Trash2, WifiOff, X } from 'lucide-react'
+import { AlertCircle, FileText, Loader2, Plus, Search, Trash2, Upload, WifiOff, X } from 'lucide-react'
 
 import {
   CreateTransactionSchema,
@@ -14,6 +14,8 @@ import {
   type TransactionType,
 } from '@/lib/schemas/transaction.schema'
 import { createTransactionAction, createReversalAction, searchTransactionsByReferenceAction } from '@/lib/actions/transaction.actions'
+import { uploadDocumentAction } from '@/lib/actions/document.actions'
+import { ALLOWED_MIME_TYPES, ALLOWED_FILE_TYPES_LABEL, MAX_FILE_SIZE_BYTES } from '@/lib/constants/document.constants'
 import { useNetworkStatus } from '@/lib/hooks/useNetworkStatus'
 import { enqueue } from '@/lib/offline/queue'
 
@@ -122,11 +124,18 @@ function subAccountLabel(extRef: string | null): string | null {
 
 // ─── Field helpers ────────────────────────────────────────────────────────────
 
-function FieldError({ message }: { message?: string }) {
+function FieldError({ message, requiredMessage }: { message?: string; requiredMessage?: string }) {
   if (!message) return null
+
+  // Zod enum errors are verbose (list all valid values). Replace with a short message.
+  let display = message
+  if (/^Invalid option: expected one of/i.test(message)) {
+    display = requiredMessage ?? 'Please select a valid option.'
+  }
+
   return (
-    <p className="mt-1.5 text-xs text-destructive" role="alert">
-      {message}
+    <p className="mt-1.5 break-words text-xs text-destructive" role="alert">
+      {display}
     </p>
   )
 }
@@ -443,6 +452,30 @@ export default function NewTransactionForm({ customers }: Props) {
   const [reversalReasonError, setReversalReasonError] = useState('')
   const [originalTxError, setOriginalTxError] = useState('')
 
+  // Source document — required file attachment (uploaded after transaction is created)
+  const [sourceDocument, setSourceDocument] = useState<File | null>(null)
+  const [sourceDocumentError, setSourceDocumentError] = useState<string | null>(null)
+  const sourceDocInputRef = useRef<HTMLInputElement>(null)
+
+  function handleSourceDocChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null
+    setSourceDocument(file)
+    if (!file) { setSourceDocumentError(null); return }
+    if (!ALLOWED_MIME_TYPES.includes(file.type as (typeof ALLOWED_MIME_TYPES)[number])) {
+      setSourceDocumentError(`Invalid file type. Only ${ALLOWED_FILE_TYPES_LABEL} files are accepted.`)
+    } else if (file.size > MAX_FILE_SIZE_BYTES) {
+      setSourceDocumentError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 10 MB.`)
+    } else {
+      setSourceDocumentError(null)
+    }
+  }
+
+  function handleClearSourceDoc() {
+    setSourceDocument(null)
+    setSourceDocumentError(null)
+    if (sourceDocInputRef.current) sourceDocInputRef.current.value = ''
+  }
+
   const {
     register,
     handleSubmit,
@@ -585,6 +618,14 @@ export default function NewTransactionForm({ customers }: Props) {
           setReversalReasonError('')
         }
 
+        // Source document is required for reversals too
+        if (!sourceDocument) {
+          setSourceDocumentError('Source document is required.')
+          hasError = true
+        } else if (sourceDocumentError) {
+          hasError = true
+        }
+
         if (hasError) return
 
         // ── Offline path ──────────────────────────────────────────────────
@@ -607,11 +648,29 @@ export default function NewTransactionForm({ customers }: Props) {
           return
         }
 
+        // Upload source document to the newly created transaction
+        const uploadResult = await uploadDocumentAction(
+          result.data!.transactionId,
+          sourceDocument!,
+          'INSTRUCTION',
+        )
+        if (!uploadResult.success) {
+          // Transaction created — warn but still navigate so the user can upload manually
+          toast.warning(`Reversal created but document upload failed: ${uploadResult.error}`)
+        }
+
         toast.success(`Reversal ${result.data!.reference} created successfully.`)
         router.push(`/transactions/${result.data!.transactionId}`)
       })
       return
     }
+
+    // Guard: source document required before submitting
+    if (!sourceDocument) {
+      setSourceDocumentError('Source document is required.')
+      return
+    }
+    if (sourceDocumentError) return
 
     // Standard transaction creation
     startTransition(async () => {
@@ -629,6 +688,17 @@ export default function NewTransactionForm({ customers }: Props) {
         return
       }
 
+      // Upload source document to the newly created transaction
+      const uploadResult = await uploadDocumentAction(
+        result.data!.transactionId,
+        sourceDocument,
+        'INSTRUCTION',
+      )
+      if (!uploadResult.success) {
+        // Transaction created — warn but still navigate so user can upload manually
+        toast.warning(`Transaction created but document upload failed: ${uploadResult.error}`)
+      }
+
       toast.success(`Transaction ${result.data!.reference} created successfully.`)
       router.push(`/transactions/${result.data!.transactionId}`)
     })
@@ -639,7 +709,7 @@ export default function NewTransactionForm({ customers }: Props) {
       onSubmit={handleSubmit(onSubmit)}
       noValidate
       aria-label="New transaction form"
-      className="space-y-8"
+      className="space-y-8 min-w-0"
     >
       {/* ── Section: Customer & Investment ── */}
       <fieldset className="rounded-xl border border-border bg-background p-6">
@@ -789,7 +859,7 @@ export default function NewTransactionForm({ customers }: Props) {
                 ))}
               </select>
             </div>
-            <FieldError message={errors.transactionType?.message} />
+            <FieldError message={errors.transactionType?.message} requiredMessage="Transaction type is required." />
           </div>
 
           {/* Scenario code — visible only for ROLLOVER, ANNIVERSARY_PAYMENT, or INTERNAL_TRANSFER */}
@@ -894,7 +964,7 @@ export default function NewTransactionForm({ customers }: Props) {
                 ))}
               </select>
             </div>
-            <FieldError message={errors.sourceInstructionType?.message} />
+            <FieldError message={errors.sourceInstructionType?.message} requiredMessage="Source instruction is required." />
           </div>
 
           {/* Purpose */}
@@ -915,6 +985,78 @@ export default function NewTransactionForm({ customers }: Props) {
             </div>
             <FieldError message={errors.purpose?.message} />
           </div>
+        </div>
+      </fieldset>
+
+      {/* ── Section: Source Document (required) ── */}
+      <fieldset className="rounded-xl border border-border bg-background p-6">
+        <legend className="px-1 text-sm font-semibold text-foreground">
+          Source Document <span className="text-destructive" aria-hidden>*</span>
+        </legend>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Attach the original customer instruction document (letter, email, signed form, etc.).
+          Accepted formats: PDF, JPG, PNG, DOC, DOCX · max 10 MB.
+        </p>
+
+        <div className="mt-4 space-y-3">
+          {sourceDocument && !sourceDocumentError ? (
+            /* Selected file preview */
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5">
+              <FileText className="size-4 shrink-0 text-emerald-600" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                {sourceDocument.name}
+              </span>
+              <span className="shrink-0 text-[0.65rem] text-muted-foreground">
+                {(sourceDocument.size / 1024 / 1024).toFixed(1)} MB
+              </span>
+              <button
+                type="button"
+                onClick={handleClearSourceDoc}
+                className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Remove ${sourceDocument.name}`}
+              >
+                <X className="size-3.5" aria-hidden />
+              </button>
+            </div>
+          ) : (
+            /* Drop zone */
+            <label
+              htmlFor="sourceDocInput"
+              className={[
+                'flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed',
+                'px-4 py-6 text-center transition-colors duration-150',
+                sourceDocumentError
+                  ? 'border-destructive bg-destructive/5'
+                  : 'border-border bg-muted/20 [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary/50 [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/40',
+              ].join(' ')}
+            >
+              <Upload className="size-5 text-muted-foreground" aria-hidden />
+              <span className="text-xs font-medium text-muted-foreground">
+                Click to browse or drop a file here
+              </span>
+              <span className="text-[0.65rem] text-muted-foreground">
+                PDF, JPG, PNG, DOC, DOCX · max 10 MB
+              </span>
+              <input
+                ref={sourceDocInputRef}
+                id="sourceDocInput"
+                type="file"
+                className="sr-only"
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,application/pdf,image/jpeg,image/png,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={handleSourceDocChange}
+                aria-label="Upload source document"
+                aria-required="true"
+              />
+            </label>
+          )}
+
+          {/* Validation error */}
+          {sourceDocumentError && (
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2">
+              <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-hidden />
+              <p className="text-xs text-destructive" role="alert">{sourceDocumentError}</p>
+            </div>
+          )}
         </div>
       </fieldset>
 
