@@ -276,7 +276,7 @@ function VerificationSection({
         eazybankzData={eazybankzData}
         investment={workspace.investment}
         sourceDocument={
-          workspace.documents.find((d) => d.document_type === 'INSTRUCTION') ?? null
+          workspace.documents.findLast((d) => d.document_type === 'INSTRUCTION') ?? null
         }
       />
 
@@ -288,7 +288,7 @@ function VerificationSection({
         auditVerification={workspace.auditVerification}
         canAuditAct={canAuditAct}
         existingDocument={
-          workspace.documents.find((d) => d.document_type === "MANDATE") ?? null
+          workspace.documents.findLast((d) => d.document_type === "MANDATE") ?? null
         }
       />
 
