@@ -236,3 +236,72 @@ export async function verifyInvestmentAction(
     },
   }
 }
+
+// ─── recordAuditVerificationAction ───────────────────────────────────────────
+
+/**
+ * Records the Audit Officer's independent verification checklist.
+ * This must be completed before the Audit Officer can approve/recall/reject
+ * the transaction at the AUDIT stage.
+ *
+ * Security: enforces AUDIT role only (5.3).
+ * Transaction must be at MIS_APPROVED status (AUDIT stage active).
+ * Delegates to record_audit_verification RPC which upserts the checklist
+ * and writes an AUDIT_VERIFICATION_RECORDED audit event.
+ */
+export async function recordAuditVerificationAction(
+  transactionId: string,
+  input: SignatureVerificationInput,
+): Promise<ActionResult<{ message: string }>> {
+  // 1. Validate inputs with Zod (reuses the same schema — same 4 checklist items)
+  const parsed = SignatureVerificationSchema.safeParse(input)
+  if (!parsed.success) {
+    const firstError = parsed.error.issues[0]?.message ?? 'Invalid input.'
+    return { success: false, error: firstError }
+  }
+
+  // 2. Authenticate
+  const user = await getAuthenticatedUser()
+  if (!user) {
+    return { success: false, error: 'Not authenticated.' }
+  }
+
+  // 3. Resolve role from DB — never from request body (Req 5.1)
+  const role = await resolveUserRole(user.id)
+  if (!role) {
+    return { success: false, error: 'No role assigned to your account.' }
+  }
+
+  // 4. Enforce AUDIT permission
+  if (role !== 'AUDIT' && role !== 'ADMIN') {
+    return {
+      success: false,
+      error: 'Only an Audit Officer can record audit verifications.',
+    }
+  }
+
+  // 5. Call the PostgreSQL RPC
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('record_audit_verification', {
+    p_transaction_id:           transactionId,
+    p_signature_result:         parsed.data.signatureResult,
+    p_mandate_result:           parsed.data.mandateResult,
+    p_account_ownership_result: parsed.data.accountOwnershipResult,
+    p_completeness_result:      parsed.data.completenessResult,
+    p_notes:                    parsed.data.notes ?? null,
+  })
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  const result = data as { success: boolean; message: string }
+
+  // 6. Revalidate the transaction workspace cache
+  revalidatePath(`/transactions/${transactionId}`)
+
+  return {
+    success: true,
+    data: { message: result.message },
+  }
+}

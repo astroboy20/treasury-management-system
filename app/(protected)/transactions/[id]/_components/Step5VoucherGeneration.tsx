@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Plus,
   Trash2,
+  WifiOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,6 +34,8 @@ import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 import type { UploadedDocument } from '@/components/treasury/DocumentUpload'
 import { VoucherDisplay } from '@/components/treasury/VoucherDisplay'
+import { useNetworkStatus } from '@/lib/hooks/useNetworkStatus'
+import { enqueue } from '@/lib/offline/queue'
 
 // ─── Prop types ───────────────────────────────────────────────────────────────
 
@@ -2256,6 +2259,9 @@ export default function Step5VoucherGeneration({
 }: Step5VoucherGenerationProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  // undefined = not yet hydrated → treat as online to avoid flicker
+  const networkStatus = useNetworkStatus()
+  const isOnline = networkStatus !== false
 
   // Ref that SavingsFundsOutForm writes its validated PI entries into.
   // We bypass RHF entirely for PI data — RHF can't hold arrays in hidden inputs.
@@ -2338,17 +2344,23 @@ export default function Step5VoucherGeneration({
     setSubmitting(true)
     setServerError(null)
 
-    const { prepareVoucherAction } = await import('@/lib/actions/voucher.actions') as {
-      prepareVoucherAction: PrepareVoucherAction
-    }
-
     // Inject the PI data from the ref directly into the input object.
-    // This bypasses RHF — which cannot hold arrays — and sends it straight to the action.
-    // Cast through unknown to avoid the discriminated-union type conflict.
     const inputWithPi =
       SAVINGS_FUNDS_OUT_TYPES.has(transactionType) && piDataRef.current
         ? ({ ...data, paymentInstruction: piDataRef.current } as unknown as VoucherPreparationInput)
         : data
+
+    // ── Offline path ──────────────────────────────────────────────────────
+    if (!isOnline) {
+      await enqueue({ type: 'PREPARE_VOUCHER', payload: { transactionId, input: inputWithPi } })
+      setSubmitting(false)
+      toast.warning("You're offline. Voucher saved and will be prepared when you reconnect.")
+      return
+    }
+
+    const { prepareVoucherAction } = await import('@/lib/actions/voucher.actions') as {
+      prepareVoucherAction: PrepareVoucherAction
+    }
 
     const result = await prepareVoucherAction(transactionId, inputWithPi)
     setSubmitting(false)
@@ -2517,10 +2529,18 @@ export default function Step5VoucherGeneration({
         {/* Submit / permission notice */}
         {canAct ? (
           <div className="flex flex-col gap-1.5 items-end pt-1">
+            {!isOnline && (
+              <span className="flex items-center gap-1.5 text-xs text-amber-700">
+                <WifiOff className="size-3.5" aria-hidden />
+                Offline — will sync on reconnect
+              </span>
+            )}
             <Button type="submit" disabled={submitting} size="sm">
               {submitting
                 ? (isReturned ? 'Resubmitting…' : 'Preparing voucher…')
-                : (isReturned ? 'Resubmit Voucher' : 'Prepare Voucher')}
+                : isOnline
+                  ? (isReturned ? 'Resubmit Voucher' : 'Prepare Voucher')
+                  : 'Save for later'}
             </Button>
           </div>
         ) : (

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { Loader2, Plus, Search, Trash2, X } from 'lucide-react'
+import { Loader2, Plus, Search, Trash2, WifiOff, X } from 'lucide-react'
 
 import {
   CreateTransactionSchema,
@@ -14,6 +14,8 @@ import {
   type TransactionType,
 } from '@/lib/schemas/transaction.schema'
 import { createTransactionAction, createReversalAction, searchTransactionsByReferenceAction } from '@/lib/actions/transaction.actions'
+import { useNetworkStatus } from '@/lib/hooks/useNetworkStatus'
+import { enqueue } from '@/lib/offline/queue'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -558,6 +560,9 @@ export default function NewTransactionForm({ customers }: Props) {
     }
   }, [paymentEntries, isExternalPayment, setValue])
 
+  // undefined = not yet hydrated → treat as online to avoid flicker
+  const networkStatus = useNetworkStatus()
+  const isOnline = networkStatus !== false
   const busy = isSubmitting || isPending
 
   async function onSubmit(data: CreateTransactionInput) {
@@ -582,6 +587,16 @@ export default function NewTransactionForm({ customers }: Props) {
 
         if (hasError) return
 
+        // ── Offline path ──────────────────────────────────────────────────
+        if (!isOnline) {
+          await enqueue({
+            type: 'CREATE_REVERSAL',
+            payload: { originalTransactionId, reversalReason: reversalReason.trim() },
+          })
+          toast.warning('You\'re offline. Reversal saved and will be submitted when you reconnect.')
+          return
+        }
+
         const result = await createReversalAction({
           originalTransactionId,
           reversalReason: reversalReason.trim(),
@@ -600,6 +615,13 @@ export default function NewTransactionForm({ customers }: Props) {
 
     // Standard transaction creation
     startTransition(async () => {
+      // ── Offline path ────────────────────────────────────────────────────
+      if (!isOnline) {
+        await enqueue({ type: 'CREATE_TRANSACTION', payload: { input: data } })
+        toast.warning('You\'re offline. Transaction saved and will be submitted when you reconnect.')
+        return
+      }
+
       const result = await createTransactionAction(data)
 
       if (!result.success) {
@@ -1244,6 +1266,12 @@ export default function NewTransactionForm({ customers }: Props) {
 
       {/* ── Submit ── */}
       <div className="flex items-center justify-end gap-3 pb-6">
+        {!isOnline && (
+          <span className="flex items-center gap-1.5 text-xs text-amber-700">
+            <WifiOff className="size-3.5" aria-hidden />
+            Offline — will sync on reconnect
+          </span>
+        )}
         <a
           href="/transactions"
           className="inline-flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted"
@@ -1256,7 +1284,7 @@ export default function NewTransactionForm({ customers }: Props) {
           className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary/90 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy && <Loader2 className="size-3.5 animate-spin" />}
-          {busy ? 'Submitting…' : 'Submit instruction'}
+          {busy ? 'Submitting…' : isOnline ? 'Submit instruction' : 'Save for later'}
         </button>
       </div>
     </form>

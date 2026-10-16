@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { CheckCircle2, DatabaseZap } from 'lucide-react'
+import { CheckCircle2, DatabaseZap, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,6 +18,8 @@ import {
 } from '@/lib/schemas/verification.schema'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 import type { EazybankzInvestment } from '@/lib/services/eazybankz'
+import { useNetworkStatus } from '@/lib/hooks/useNetworkStatus'
+import { enqueue } from '@/lib/offline/queue'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -219,6 +221,9 @@ export default function Step4InvestmentVerification({
 }: Step4InvestmentVerificationProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  // undefined = not yet hydrated → treat as online to avoid flicker
+  const networkStatus = useNetworkStatus()
+  const isOnline = networkStatus !== false
 
   const {
     register,
@@ -241,6 +246,14 @@ export default function Step4InvestmentVerification({
   async function onSubmit(data: InvestmentVerificationInput) {
     setSubmitting(true)
     setServerError(null)
+
+    // ── Offline path ──────────────────────────────────────────────────────
+    if (!isOnline) {
+      await enqueue({ type: 'VERIFY_INVESTMENT', payload: { transactionId, input: data } })
+      setSubmitting(false)
+      toast.warning("You're offline. Investment snapshot saved and will be submitted when you reconnect.")
+      return
+    }
 
     const result = await verifyInvestmentAction(transactionId, data)
     setSubmitting(false)
@@ -428,8 +441,14 @@ export default function Step4InvestmentVerification({
         {/* Submit / permission notice */}
         {canAct ? (
           <div className="flex flex-col gap-1.5 items-end pt-1">
+            {!isOnline && (
+              <span className="flex items-center gap-1.5 text-xs text-amber-700">
+                <WifiOff className="size-3.5" aria-hidden />
+                Offline — will sync on reconnect
+              </span>
+            )}
             <Button type="submit" disabled={submitting} size="sm">
-              {submitting ? 'Saving snapshot…' : 'Confirm & Save Snapshot'}
+              {submitting ? 'Saving snapshot…' : isOnline ? 'Confirm & Save Snapshot' : 'Save for later'}
             </Button>
           </div>
         ) : (

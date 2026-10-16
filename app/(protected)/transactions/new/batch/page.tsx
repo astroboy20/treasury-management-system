@@ -51,32 +51,15 @@ export default async function BatchTransactionPage() {
       <div className="mt-6">
         <div className="flex items-center gap-2">
           <Layers className="size-5 text-primary" aria-hidden />
-          <p className="text-sm font-medium text-primary">Step 1 of 6 — Batch Mode</p>
+          <p className="text-sm font-medium text-primary">Step 1 of 6</p>
         </div>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-          Batch Customer Instructions
+          New Customer Instructions
         </h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Register up to 10 customer instructions at once. Each transaction enters the
+          Record between 1 and 20 customer instructions at once. Each transaction enters the
           normal 6-step workflow independently after submission.
         </p>
-      </div>
-
-      {/* Single / Batch mode toggle */}
-      <div className="mt-6 flex items-center gap-2 rounded-xl border border-border bg-muted/30 p-1">
-        <Link
-          href="/transactions/new"
-          className="flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-background [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
-        >
-          Single instruction
-        </Link>
-        <span
-          aria-current="page"
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-background px-4 py-2 text-center text-sm font-medium text-foreground shadow-sm"
-        >
-          <Layers className="size-3.5" aria-hidden />
-          Batch (up to 10)
-        </span>
       </div>
 
       {/* Form */}

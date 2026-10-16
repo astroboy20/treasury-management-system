@@ -4,31 +4,36 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, WifiOff, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import { DocumentUpload } from "@/components/treasury/DocumentUpload";
-import type { UploadedDocument } from "@/components/treasury/DocumentUpload";
-import { verifySignatureAction } from "@/lib/actions/verification.actions";
+import { Separator } from "@/components/ui/separator";
+import { verifySignatureAction, recordAuditVerificationAction } from "@/lib/actions/verification.actions";
 import {
   SignatureVerificationSchema,
   type SignatureVerificationInput,
   type CheckResult,
 } from "@/lib/schemas/verification.schema";
 import type { TransactionWorkspace } from "@/lib/services/transaction.service";
+import { useNetworkStatus } from "@/lib/hooks/useNetworkStatus";
+import { enqueue } from "@/lib/offline/queue";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface Step2SignatureVerificationProps {
   transactionId: string;
-  /** Existing verification record — if present, panel is read-only */
+  /** Treasury Officer's verification record — if present, treasury form is read-only */
   signatureVerification: TransactionWorkspace["signatureVerification"];
-  /** Whether the current user's role can act (TREASURY_OFFICER or ADMIN) */
+  /** Whether the current user is a TREASURY_OFFICER or ADMIN */
   canAct: boolean;
+  /** Audit Officer's verification record */
+  auditVerification: TransactionWorkspace["auditVerification"];
+  /** Whether the current user is an AUDIT officer or ADMIN and the stage is active */
+  canAuditAct: boolean;
   /** Previously uploaded mandate document, if any */
-  existingDocument?: UploadedDocument | null;
+  existingDocument?: import("@/components/treasury/DocumentUpload").UploadedDocument | null;
 }
 
 // ─── Checklist item config ────────────────────────────────────────────────────
@@ -48,8 +53,7 @@ const CHECKLIST_ITEMS: ChecklistItem[] = [
   {
     field: "mandateResult",
     label: "Mandate Check",
-    description:
-      "Mandate requirements are satisfied for this transaction type.",
+    description: "Mandate requirements are satisfied for this transaction type.",
   },
   {
     field: "accountOwnershipResult",
@@ -59,8 +63,7 @@ const CHECKLIST_ITEMS: ChecklistItem[] = [
   {
     field: "completenessResult",
     label: "Instruction Completeness",
-    description:
-      "All required fields in the instruction are present and valid.",
+    description: "All required fields in the instruction are present and valid.",
   },
 ];
 
@@ -79,16 +82,10 @@ function ResultBadge({ result }: { result: string }) {
     <span
       className={[
         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-        isPassed
-          ? "bg-emerald-100 text-emerald-700"
-          : "bg-red-100 text-red-700",
+        isPassed ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
       ].join(" ")}
     >
-      {isPassed ? (
-        <CheckCircle2 className="size-3" aria-hidden />
-      ) : (
-        <XCircle className="size-3" aria-hidden />
-      )}
+      {isPassed ? <CheckCircle2 className="size-3" aria-hidden /> : <XCircle className="size-3" aria-hidden />}
       {isPassed ? "Passed" : "Failed"}
     </span>
   );
@@ -116,14 +113,11 @@ interface ToggleRowProps {
 
 function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
   const isPassed = value === "PASSED";
-
   return (
     <div
       className={[
         "flex items-center justify-between gap-3 rounded-lg border p-3 transition-colors",
-        isPassed
-          ? "border-emerald-200 bg-emerald-50/50"
-          : "border-border bg-background",
+        isPassed ? "border-emerald-200 bg-emerald-50/50" : "border-border bg-background",
       ].join(" ")}
     >
       <div
@@ -131,9 +125,7 @@ function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
         onClick={() => onChange(isPassed ? "FAILED" : "PASSED")}
       >
         <p className="text-sm font-medium text-foreground">{item.label}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {item.description}
-        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
       </div>
       <button
         type="button"
@@ -141,6 +133,7 @@ function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
         aria-checked={isPassed}
         aria-label={`${item.label}: ${isPassed ? "Passed" : "Failed"}`}
         disabled={disabled}
+        onClick={() => onChange(isPassed ? "FAILED" : "PASSED")}
         className={[
           "flex shrink-0 items-center justify-center rounded-full border-2 size-8 transition-colors",
           isPassed
@@ -151,23 +144,144 @@ function ToggleRow({ item, value, onChange, disabled }: ToggleRowProps) {
             : "cursor-pointer [@media(hover:hover)_and_(pointer:fine)]:hover:border-emerald-400",
         ].join(" ")}
       >
-        {isPassed ? (
-          <CheckCircle2 className="size-4" aria-hidden />
-        ) : (
-          <XCircle className="size-4" aria-hidden />
-        )}
+        {isPassed ? <CheckCircle2 className="size-4" aria-hidden /> : <XCircle className="size-4" aria-hidden />}
       </button>
     </div>
   );
 }
 
+// ─── Read-only checklist grid ─────────────────────────────────────────────────
+
+function ChecklistResults({
+  signatureResult,
+  mandateResult,
+  accountOwnershipResult,
+  completenessResult,
+}: {
+  signatureResult: string;
+  mandateResult: string;
+  accountOwnershipResult: string;
+  completenessResult: string;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {[
+        { label: "Signature Match",          result: signatureResult },
+        { label: "Mandate Check",            result: mandateResult },
+        { label: "Account Ownership",        result: accountOwnershipResult },
+        { label: "Instruction Completeness", result: completenessResult },
+      ].map(({ label, result }) => (
+        <div
+          key={label}
+          className={[
+            "flex items-center justify-between gap-3 rounded-lg border p-3",
+            result === "PASSED" ? "border-emerald-200 bg-emerald-50/50" : "border-border bg-muted/30",
+          ].join(" ")}
+        >
+          <span className="text-sm text-foreground">{label}</span>
+          <ResultBadge result={result} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Audit checklist form (inline, same style as treasury form) ───────────────
+
+interface AuditChecklistFormProps {
+  transactionId: string;
+  auditVerification: TransactionWorkspace["auditVerification"];
+  canAuditAct: boolean;
+}
+
+function AuditChecklistForm({ transactionId, auditVerification, canAuditAct }: AuditChecklistFormProps) {
+  const [submitting, setSubmitting] = useState(false);
+
+  const {
+    handleSubmit,
+    watch,
+    setValue,
+    register,
+    formState: { errors },
+  } = useForm<SignatureVerificationInput>({
+    resolver: zodResolver(SignatureVerificationSchema),
+    defaultValues: {
+      signatureResult:        auditVerification?.signature_result         as CheckResult ?? "FAILED",
+      mandateResult:          auditVerification?.mandate_result           as CheckResult ?? "FAILED",
+      accountOwnershipResult: auditVerification?.account_ownership_result as CheckResult ?? "FAILED",
+      completenessResult:     auditVerification?.completeness_result      as CheckResult ?? "FAILED",
+      notes:                  auditVerification?.notes ?? "",
+    },
+  });
+
+  const watchedValues = watch();
+
+  async function onSubmit(data: SignatureVerificationInput) {
+    setSubmitting(true);
+    const result = await recordAuditVerificationAction(transactionId, data);
+    setSubmitting(false);
+
+    if (result.success) {
+      toast.success("Audit verification checklist saved.");
+    } else {
+      toast.error(result.error ?? "Failed to save. Please try again.");
+    }
+  }
+
+  // Read-only view once submitted (but still shows the form pre-filled for updates)
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+      <div className="space-y-2">
+        {CHECKLIST_ITEMS.map((item) => (
+          <ToggleRow
+            key={item.field}
+            item={item}
+            value={watchedValues[item.field] ?? "FAILED"}
+            onChange={(val) => setValue(item.field, val, { shouldValidate: true })}
+            disabled={!canAuditAct || submitting}
+          />
+        ))}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="audit-sig-notes" className="text-xs font-medium text-muted-foreground">
+          Notes{" "}
+          <span className="font-normal text-muted-foreground/70">(optional, max 1 000 chars)</span>
+        </Label>
+        <Textarea
+          id="audit-sig-notes"
+          rows={3}
+          maxLength={1000}
+          disabled={!canAuditAct || submitting}
+          placeholder="Add any notes about your audit review…"
+          {...register("notes")}
+          aria-describedby={errors.notes ? "audit-sig-notes-error" : undefined}
+          className="resize-none text-sm"
+        />
+        {errors.notes && (
+          <p id="audit-sig-notes-error" className="text-xs text-destructive" role="alert">
+            {errors.notes.message}
+          </p>
+        )}
+      </div>
+
+      {canAuditAct ? (
+        <div className="flex justify-end pt-1">
+          <Button type="submit" disabled={submitting} size="sm">
+            {submitting ? "Saving…" : auditVerification ? "Update Verification" : "Submit Verification"}
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs italic text-muted-foreground">
+          Only an Audit Officer can submit this verification.
+        </p>
+      )}
+    </form>
+  );
+}
+
 // ─── Entry animation styles ───────────────────────────────────────────────────
 
-/*
- * Opacity fade runs unconditionally — negligible vestibular impact.
- * The translateY transform is only added when the user has NOT requested
- * reduced motion, per Req 32.9.
- */
 const PANEL_ANIMATION_STYLE = `
   @keyframes sigFadeIn {
     from { opacity: 0; }
@@ -192,24 +306,28 @@ const PANEL_ANIMATION_STYLE = `
 /**
  * Step 2 — Signature Verification Panel.
  *
- * Shows a four-item checklist form for TREASURY_OFFICER to verify the
- * customer's instruction against mandates and account records.
+ * Treasury Officer fills in the 4-item checklist first (Step 1 of the normal
+ * flow). Later, when the Audit Officer reaches their approval stage (MIS_APPROVED),
+ * the same panel shows a second identical checklist for the Audit Officer to
+ * complete independently. Both records are preserved with their respective
+ * performer names and timestamps.
  *
- * Behaviour:
- *   - Read-only when signatureVerification is already recorded.
- *   - Any FAILED result shows a destructive Alert explaining the downstream lock.
- *   - On submit: calls verifySignatureAction, shows Sonner toast on result.
- *
- * Requirements: 8.1, 8.2, 8.3, 8.4, 8.5
+ * Read-only display once both records are submitted.
+ * Requirements: 8.1–8.5
  */
 export default function Step2SignatureVerification({
   transactionId,
   signatureVerification,
   canAct,
-  existingDocument,
+  auditVerification,
+  canAuditAct,
+  existingDocument: _existingDocument,
 }: Step2SignatureVerificationProps) {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  // undefined = not yet hydrated → treat as online to avoid flicker
+  const networkStatus = useNetworkStatus();
+  const isOnline = networkStatus !== false;
 
   const {
     handleSubmit,
@@ -233,6 +351,13 @@ export default function Step2SignatureVerification({
     setSubmitting(true);
     setServerError(null);
 
+    if (!isOnline) {
+      await enqueue({ type: "VERIFY_SIGNATURE", payload: { transactionId, input: data } });
+      setSubmitting(false);
+      toast.warning("You're offline. Verification saved and will be submitted when you reconnect.");
+      return;
+    }
+
     const result = await verifySignatureAction(transactionId, data);
     setSubmitting(false);
 
@@ -245,7 +370,7 @@ export default function Step2SignatureVerification({
     }
   }
 
-  // ── Read-only mode ──────────────────────────────────────────────────────────
+  // ── Read-only mode (Treasury record exists) ─────────────────────────────────
 
   if (signatureVerification) {
     const {
@@ -265,10 +390,10 @@ export default function Step2SignatureVerification({
       completeness_result === "FAILED";
 
     return (
-      <div className="sig-panel space-y-4">
+      <div className="sig-panel space-y-5">
         <style>{PANEL_ANIMATION_STYLE}</style>
 
-        {/* Req 8.3 — downstream lock alert for any FAILED result */}
+        {/* Downstream lock alert */}
         {anyFailed && (
           <Alert variant="destructive">
             <AlertTitle>Signature Verification Failed</AlertTitle>
@@ -279,85 +404,102 @@ export default function Step2SignatureVerification({
           </Alert>
         )}
 
-        <dl className="grid gap-4 sm:grid-cols-2">
-          {/* Checklist results */}
-          <div className="sm:col-span-2">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Checklist Results
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {[
-                { label: "Signature Match", result: signature_result },
-                { label: "Mandate Check", result: mandate_result },
-                {
-                  label: "Account Ownership",
-                  result: account_ownership_result,
-                },
-                {
-                  label: "Instruction Completeness",
-                  result: completeness_result,
-                },
-              ].map(({ label, result }) => (
-                <div
-                  key={label}
-                  className={[
-                    "flex items-center justify-between gap-3 rounded-lg border p-3",
-                    result === "PASSED"
-                      ? "border-emerald-200 bg-emerald-50/50"
-                      : "border-border bg-muted/30",
-                  ].join(" ")}
-                >
-                  <span className="text-sm text-foreground">{label}</span>
-                  <ResultBadge result={result} />
+        {/* ── Treasury Officer record ── */}
+        <div className="space-y-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Checklist Results
+          </p>
+          <ChecklistResults
+            signatureResult={signature_result}
+            mandateResult={mandate_result}
+            accountOwnershipResult={account_ownership_result}
+            completenessResult={completeness_result}
+          />
+
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Verified By"
+              value={verifier?.full_name ?? signatureVerification.verified_by}
+            />
+            <Field label="Verified At" value={formatDate(verified_at)} />
+            {notes && (
+              <div className="sm:col-span-2">
+                <dt className="text-xs font-medium text-muted-foreground">Notes</dt>
+                <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">{notes}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+
+        {/* ── Audit Officer section ── */}
+        {/* Show when: audit officer is the actor (canAuditAct) OR a record already exists */}
+        {(canAuditAct || auditVerification) && (
+          <>
+            <Separator />
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Audit Officer Verification
+                </p>
+                {auditVerification && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                    <CheckCircle2 className="size-3" aria-hidden />
+                    Completed
+                  </span>
+                )}
+              </div>
+
+              {/* If audit record exists — show results first, then allow update if still active */}
+              {auditVerification && (
+                <div className="space-y-3">
+                  <ChecklistResults
+                    signatureResult={auditVerification.signature_result}
+                    mandateResult={auditVerification.mandate_result}
+                    accountOwnershipResult={auditVerification.account_ownership_result}
+                    completenessResult={auditVerification.completeness_result}
+                  />
+                  <dl className="grid gap-4 sm:grid-cols-2">
+                    <Field
+                      label="Verified By"
+                      value={auditVerification.verifier?.full_name ?? auditVerification.verified_by}
+                    />
+                    <Field label="Verified At" value={formatDate(auditVerification.verified_at)} />
+                    {auditVerification.notes && (
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs font-medium text-muted-foreground">Notes</dt>
+                        <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">
+                          {auditVerification.notes}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
                 </div>
-              ))}
+              )}
+
+              {/* Audit form — shown when it's the audit officer's turn */}
+              {canAuditAct && (
+                <>
+                  {auditVerification && <Separator className="my-2" />}
+                  <AuditChecklistForm
+                    transactionId={transactionId}
+                    auditVerification={auditVerification}
+                    canAuditAct={canAuditAct}
+                  />
+                </>
+              )}
             </div>
-          </div>
-
-          <Field
-            label="Verified By"
-            value={verifier?.full_name ?? signatureVerification.verified_by}
-          />
-          <Field label="Verified At" value={formatDate(verified_at)} />
-
-          {notes && (
-            <div className="sm:col-span-2">
-              <dt className="text-xs font-medium text-muted-foreground">
-                Notes
-              </dt>
-              <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">
-                {notes}
-              </dd>
-            </div>
-          )}
-        </dl>
-
-        {/* Mandate document upload — commented out, not needed in current flow */}
-        {/* <div className="rounded-lg border border-border bg-muted/20 p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Attach Mandate Document
-          </p>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Upload the signed mandate card or authority document used for
-            signature verification.
-          </p>
-          <DocumentUpload
-            transactionId={transactionId}
-            defaultDocumentType="MANDATE"
-            existingDocument={existingDocument}
-          />
-        </div> */}
+          </>
+        )}
       </div>
     );
   }
 
-  // ── Form mode ───────────────────────────────────────────────────────────────
+  // ── Form mode (Treasury Officer hasn't submitted yet) ───────────────────────
 
   return (
     <div className="sig-panel space-y-4">
       <style>{PANEL_ANIMATION_STYLE}</style>
 
-      {/* Server-side error alert */}
       {serverError && (
         <Alert variant="destructive">
           <AlertTitle>Submission Error</AlertTitle>
@@ -366,7 +508,6 @@ export default function Step2SignatureVerification({
       )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        {/* Checklist toggles — Req 8.1 */}
         <div className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Verification Checklist
@@ -376,24 +517,16 @@ export default function Step2SignatureVerification({
               key={item.field}
               item={item}
               value={watchedValues[item.field] ?? "FAILED"}
-              onChange={(val) =>
-                setValue(item.field, val, { shouldValidate: true })
-              }
+              onChange={(val) => setValue(item.field, val, { shouldValidate: true })}
               disabled={!canAct || submitting}
             />
           ))}
         </div>
 
-        {/* Notes textarea — optional */}
         <div className="space-y-1.5">
-          <Label
-            htmlFor="sig-notes"
-            className="text-xs font-medium text-muted-foreground"
-          >
+          <Label htmlFor="sig-notes" className="text-xs font-medium text-muted-foreground">
             Notes{" "}
-            <span className="font-normal text-muted-foreground/70">
-              (optional, max 1 000 chars)
-            </span>
+            <span className="font-normal text-muted-foreground/70">(optional, max 1 000 chars)</span>
           </Label>
           <Textarea
             id="sig-notes"
@@ -406,21 +539,22 @@ export default function Step2SignatureVerification({
             className="resize-none text-sm"
           />
           {errors.notes && (
-            <p
-              id="sig-notes-error"
-              className="text-xs text-destructive"
-              role="alert"
-            >
+            <p id="sig-notes-error" className="text-xs text-destructive" role="alert">
               {errors.notes.message}
             </p>
           )}
         </div>
 
-        {/* Submit / permission notice */}
         {canAct ? (
           <div className="flex flex-col gap-1.5 items-end pt-1">
+            {!isOnline && (
+              <span className="flex items-center gap-1.5 text-xs text-amber-700">
+                <WifiOff className="size-3.5" aria-hidden />
+                Offline — will sync on reconnect
+              </span>
+            )}
             <Button type="submit" disabled={submitting} size="sm">
-              {submitting ? "Submitting…" : "Submit Verification"}
+              {submitting ? "Submitting…" : isOnline ? "Submit Verification" : "Save for later"}
             </Button>
           </div>
         ) : (
@@ -429,24 +563,6 @@ export default function Step2SignatureVerification({
           </p>
         )}
       </form>
-
-      {/* Mandate document upload — commented out, not needed in current flow */}
-      {/* <div className="rounded-lg border border-border bg-muted/20 p-4">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Attach Mandate Document <span className="text-destructive">*</span>
-        </p>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Upload the signed mandate card or authority document used for
-          signature verification.
-        </p>
-        <DocumentUpload
-          transactionId={transactionId}
-          defaultDocumentType="MANDATE"
-          required
-          existingDocument={existingDocument}
-          onUploadSuccess={() => setDocumentUploaded(true)}
-        />
-      </div> */}
     </div>
   );
 }

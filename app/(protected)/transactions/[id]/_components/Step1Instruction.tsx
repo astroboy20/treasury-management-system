@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
-import { ArrowRight, DatabaseZap, AlertTriangle, Pencil } from 'lucide-react'
+import { ArrowRight, DatabaseZap, AlertTriangle, Pencil, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -34,6 +34,7 @@ import type { UpdateCustomerInput } from '@/lib/schemas/customer.schema'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
 import type { EazybankzInvestment } from '@/lib/services/eazybankz'
 import type { UploadedDocument } from '@/components/treasury/DocumentUpload'
+import { DocumentUpload } from '@/components/treasury/DocumentUpload'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,8 @@ interface Step1InstructionProps {
   eazybankzData?: EazybankzInvestment | null
   /** Local investment record linked to the transaction */
   investment?: TransactionWorkspace['investment']
+  /** Source instruction document (INSTRUCTION type), if already uploaded */
+  sourceDocument?: UploadedDocument | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -250,6 +253,7 @@ export default function Step1Instruction({
   paymentInstructions,
   eazybankzData,
   investment,
+  sourceDocument,
 }: Step1InstructionProps) {
   const [editOpen, setEditOpen] = useState(false)
 
@@ -439,6 +443,26 @@ export default function Step1Instruction({
           )}
         </div>
       )}
+
+      {/* Source document — shown when one was attached at creation, or allow upload */}
+      <div className="rounded-lg border border-border bg-background p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Source Document
+          </p>
+        </div>
+
+        {sourceDocument || canUpload ? (
+          <DocumentUpload
+            transactionId={transaction.id}
+            defaultDocumentType="INSTRUCTION"
+            existingDocument={sourceDocument ?? null}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground italic">No source document attached.</p>
+        )}
+      </div>
 
       {/* Update customer dialog */}
       {customer && editOpen && (

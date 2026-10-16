@@ -24,14 +24,14 @@ export interface BatchCreateResult {
 // ─── createTransactionBatchAction ─────────────────────────────────────────────
 
 /**
- * Creates up to 10 treasury transactions in a single server action call.
+ * Creates up to 20 treasury transactions in a single server action call.
  *
  * Each row is validated and submitted independently via the existing
  * createTransactionAction. Partial failures are allowed — a failed row
  * does not prevent the rest from being created. The caller receives a
  * per-row result array so the UI can highlight exactly which rows failed.
  *
- * Max rows: 10 (enforced server-side — clients must not exceed this).
+ * Max rows: 20 (enforced server-side — clients must not exceed this).
  * Role: TREASURY_OFFICER or ADMIN only (same as single creation).
  */
 export async function createTransactionBatchAction(
@@ -59,8 +59,8 @@ export async function createTransactionBatchAction(
   if (!Array.isArray(rows) || rows.length === 0) {
     return { success: false, error: 'Batch must contain at least one transaction.' }
   }
-  if (rows.length > 10) {
-    return { success: false, error: 'Batch cannot exceed 10 transactions.' }
+  if (rows.length > 20) {
+    return { success: false, error: 'Batch cannot exceed 20 transactions.' }
   }
 
   // Process each row sequentially — avoids overwhelming the DB connection

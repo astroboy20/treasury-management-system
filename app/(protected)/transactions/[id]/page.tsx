@@ -204,12 +204,6 @@ interface VerificationSectionProps {
   userId: string | null;
   eazybankzData: import("@/lib/services/eazybankz").EazybankzInvestment | null;
 }
-
-/**
- * Renders the instruction + all verification/voucher steps as a single
- * collapsible section managed entirely by the Treasury Maker.
- * No sub-headings — all content flows as one continuous panel.
- */
 function VerificationSection({
   steps,
   workspace,
@@ -261,6 +255,11 @@ function VerificationSection({
 
   const isTreasuryMaker = userRole === "TREASURY_OFFICER" || userRole === "ADMIN";
 
+  // Audit officer can fill in the checklist when the transaction is at MIS_APPROVED (their turn)
+  const canAuditAct =
+    (userRole === "AUDIT" || userRole === "ADMIN") &&
+    workspace.transaction.status === "MIS_APPROVED";
+
   // Render the full flat content of all steps 1–5 with no sub-headings
   const flatContent = (
     <div className="border-t border-border px-5 py-5 sm:px-6 space-y-8">
@@ -270,9 +269,13 @@ function VerificationSection({
         customer={workspace.customer}
         createdBy={workspace.createdBy}
         canEdit={isTreasuryMaker}
+        canUpload={isTreasuryMaker}
         paymentInstructions={workspace.paymentInstructions}
         eazybankzData={eazybankzData}
         investment={workspace.investment}
+        sourceDocument={
+          workspace.documents.find((d) => d.document_type === 'INSTRUCTION') ?? null
+        }
       />
 
       {/* Signature verification form */}
@@ -280,6 +283,8 @@ function VerificationSection({
         transactionId={workspace.transaction.id}
         signatureVerification={workspace.signatureVerification}
         canAct={isTreasuryMaker}
+        auditVerification={workspace.auditVerification}
+        canAuditAct={canAuditAct}
         existingDocument={
           workspace.documents.find((d) => d.document_type === "MANDATE") ?? null
         }
@@ -401,6 +406,7 @@ function StepContent({
       approvals={workspace.approvals}
       currentUserId={userId ?? ""}
       currentUserRole={userRole}
+      auditChecklistDone={!!workspace.auditVerification}
     />
   );
 }

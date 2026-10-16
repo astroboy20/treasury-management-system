@@ -196,6 +196,17 @@ export interface TransactionWorkspace {
     uploaded_by: string
     created_at: string
   }>
+  auditVerification: {
+    id: string
+    verified_by: string
+    signature_result: string
+    mandate_result: string
+    account_ownership_result: string
+    completeness_result: string
+    notes: string | null
+    verified_at: string
+    verifier?: { full_name: string }
+  } | null
   auditEvents: Array<{
     id: number
     actor_id: string | null
@@ -372,7 +383,7 @@ export async function getTransactionWorkspace(
   const supabase = await createClient()
 
   // Load all workspace data in parallel
-  const [txResult, sigResult, confResult, invResult, voucherResult, approvalsResult, opsResult, docsResult, auditResult, piResult] =
+  const [txResult, sigResult, confResult, invResult, voucherResult, approvalsResult, opsResult, docsResult, auditResult, piResult, auditVerifResult] =
     await Promise.all([
       // Core transaction + customer + investment
       supabase
@@ -477,6 +488,17 @@ export async function getTransactionWorkspace(
         .select('id, account_number, beneficiary_name, bank_name, account_type, is_internal, sort_order')
         .eq('transaction_id', transactionId)
         .order('sort_order', { ascending: true }),
+
+      // Audit verification checklist — completed by the Audit Officer during AUDIT stage
+      supabase
+        .from('audit_verifications')
+        .select(
+          `id, verified_by, signature_result, mandate_result, account_ownership_result,
+           completeness_result, notes, verified_at,
+           profiles!audit_verifications_verified_by_fkey ( full_name )`,
+        )
+        .eq('transaction_id', transactionId)
+        .maybeSingle(),
     ])
 
   if (txResult.error || !txResult.data) return null
@@ -550,5 +572,11 @@ export async function getTransactionWorkspace(
       actor: normaliseProfile((e as Record<string, unknown>).profiles),
     })) as TransactionWorkspace['auditEvents'],
     paymentInstructions: (piResult.data ?? []) as TransactionWorkspace['paymentInstructions'],
+    auditVerification: auditVerifResult.data
+      ? {
+          ...auditVerifResult.data,
+          verifier: normaliseProfile((auditVerifResult.data as Record<string, unknown>).profiles),
+        }
+      : null,
   }
 }

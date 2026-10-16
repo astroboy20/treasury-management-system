@@ -11,6 +11,10 @@ import {
   ArrowRight,
   Loader2,
   Copy,
+  Upload,
+  FileText,
+  WifiOff,
+  X,
 } from 'lucide-react'
 
 import {
@@ -20,6 +24,10 @@ import {
   type PaymentInstruction,
 } from '@/lib/schemas/transaction.schema'
 import { createTransactionBatchAction, type BatchRowResult } from '@/lib/actions/batch.actions'
+import { uploadDocumentAction } from '@/lib/actions/document.actions'
+import { ALLOWED_MIME_TYPES, ALLOWED_FILE_TYPES_LABEL, MAX_FILE_SIZE_BYTES } from '@/lib/constants/document.constants'
+import { useNetworkStatus } from '@/lib/hooks/useNetworkStatus'
+import { enqueue } from '@/lib/offline/queue'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,11 +67,14 @@ interface RowState {
   loadingInvestments: boolean
   // Per-row validation errors (populated on submit attempt)
   errors: Partial<Record<keyof CreateTransactionInput | 'general', string>>
+  // Source document to upload after transaction is created
+  sourceDocument: File | null
+  sourceDocumentError: string | null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MAX_ROWS = 10
+const MAX_ROWS = 20
 
 const TRANSACTION_TYPE_OPTIONS: { value: TransactionType; label: string }[] = [
   { value: 'ROLLOVER',             label: 'Rollover' },
@@ -149,6 +160,8 @@ function makeEmptyRow(id: string): RowState {
     investments: [],
     loadingInvestments: false,
     errors: {},
+    sourceDocument: null,
+    sourceDocumentError: null,
   }
 }
 
@@ -183,6 +196,17 @@ function formatCurrency(val: string) {
   }).format(n)
 }
 
+function validateSourceDocumentFile(file: File): string | null {
+  if (!ALLOWED_MIME_TYPES.includes(file.type as (typeof ALLOWED_MIME_TYPES)[number])) {
+    return `Invalid file type. Only ${ALLOWED_FILE_TYPES_LABEL} files are accepted.`
+  }
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+    return `File too large (${sizeMB} MB). Maximum allowed size is 10 MB.`
+  }
+  return null
+}
+
 // ─── CustomerSelect — inline searchable select ───────────────────────────────
 
 function CustomerSelect({
@@ -214,6 +238,78 @@ function CustomerSelect({
         </option>
       ))}
     </select>
+  )
+}
+
+// ─── SourceDocumentUpload — inline file picker for a row ─────────────────────
+
+function SourceDocumentUpload({
+  rowId,
+  file,
+  fileError,
+  onFileChange,
+}: {
+  rowId: string
+  file: File | null
+  fileError: string | null
+  onFileChange: (file: File | null) => void
+}) {
+  const inputId = `src-doc-${rowId}`
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files?.[0] ?? null
+    onFileChange(picked)
+    // reset so re-selecting same file triggers onChange
+    e.target.value = ''
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-muted/10 p-3 space-y-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Source Document{' '}
+        <span className="normal-case font-normal text-muted-foreground/70">(optional)</span>
+      </p>
+
+      {file ? (
+        <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5">
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
+            {file.name}
+          </span>
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            {(file.size / (1024 * 1024)).toFixed(1)} MB
+          </span>
+          <button
+            type="button"
+            onClick={() => onFileChange(null)}
+            className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground"
+            aria-label={`Remove ${file.name}`}
+          >
+            <X className="size-3" aria-hidden />
+          </button>
+        </div>
+      ) : (
+        <label
+          htmlFor={inputId}
+          className="flex cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary/50 [@media(hover:hover)_and_(pointer:fine)]:hover:text-primary"
+        >
+          <Upload className="size-3.5 shrink-0" aria-hidden />
+          Click to attach a document (PDF, JPG, PNG · max 10 MB)
+          <input
+            id={inputId}
+            type="file"
+            className="sr-only"
+            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+            onChange={handleChange}
+            aria-label="Attach source document"
+          />
+        </label>
+      )}
+
+      {fileError && (
+        <p className="text-[11px] text-destructive">{fileError}</p>
+      )}
+    </div>
   )
 }
 
@@ -640,6 +736,19 @@ function RowCard({
           </div>
         )}
       </div>
+
+      {/* Source document upload */}
+      <SourceDocumentUpload
+        rowId={row.id}
+        file={row.sourceDocument}
+        fileError={row.sourceDocumentError}
+        onFileChange={(file) =>
+          onUpdate({
+            sourceDocument: file,
+            sourceDocumentError: file ? validateSourceDocumentFile(file) : null,
+          })
+        }
+      />
     </div>
   )
 }
@@ -765,6 +874,9 @@ export default function BatchTransactionForm({ customers }: BatchTransactionForm
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const formId = useId()
+  // undefined = not yet hydrated → treat as online to avoid flicker
+  const networkStatus = useNetworkStatus()
+  const isOnline = networkStatus !== false
 
   // Row list — starts with one empty row
   const [rows, setRows] = useState<RowState[]>([makeEmptyRow(uid())])
@@ -878,6 +990,15 @@ export default function BatchTransactionForm({ customers }: BatchTransactionForm
             : undefined,
       }))
 
+      // ── Offline path ──────────────────────────────────────────────────────
+      if (!isOnline) {
+        await enqueue({ type: 'CREATE_TRANSACTION_BATCH', payload: { rows: inputs } })
+        toast.warning(
+          `You're offline. ${inputs.length} instruction${inputs.length !== 1 ? 's' : ''} saved and will be submitted when you reconnect.`,
+        )
+        return
+      }
+
       const result = await createTransactionBatchAction(inputs)
 
       if (!result.success) {
@@ -886,6 +1007,25 @@ export default function BatchTransactionForm({ customers }: BatchTransactionForm
       }
 
       const { results: batchResults, successCount, failCount } = result.data!
+
+      // Upload source documents for successfully created transactions
+      const uploadPromises = batchResults
+        .filter((r) => r.success && r.transactionId)
+        .map((r) => {
+          const row = rows[r.index]
+          if (!row?.sourceDocument) return Promise.resolve()
+          return uploadDocumentAction(r.transactionId!, row.sourceDocument, 'INSTRUCTION').then(
+            (uploadResult) => {
+              if (!uploadResult.success) {
+                console.warn(
+                  `[BatchForm] Source document upload failed for row ${r.index + 1}: ${uploadResult.error}`,
+                )
+              }
+            },
+          )
+        })
+
+      await Promise.all(uploadPromises)
 
       setResults(batchResults)
 
@@ -969,26 +1109,42 @@ export default function BatchTransactionForm({ customers }: BatchTransactionForm
       )}
 
       {/* Submit bar */}
-      <div className="sticky bottom-0 flex items-center justify-between gap-3 rounded-xl border border-border bg-background/95 px-5 py-3 shadow-sm backdrop-blur-sm">
-        <p className="text-xs text-muted-foreground">
-          {rows.length} instruction{rows.length !== 1 ? 's' : ''} ready to submit
-        </p>
+      <div className="sticky bottom-0 flex flex-col gap-2 rounded-xl border border-border bg-background/95 px-4 py-3 shadow-sm backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-5">
+        <div className="flex items-center justify-between gap-2 sm:contents">
+          <p className="text-xs text-muted-foreground">
+            {rows.length} instruction{rows.length !== 1 ? 's' : ''} ready to submit
+          </p>
+          {!isOnline && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-700 sm:hidden">
+              <WifiOff className="size-3.5" aria-hidden />
+              Offline
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
+          {!isOnline && (
+            <span className="hidden items-center gap-1.5 text-xs text-amber-700 sm:flex">
+              <WifiOff className="size-3.5" aria-hidden />
+              Offline
+            </span>
+          )}
           <a
             href="/transactions"
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-foreground transition-colors [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted"
+            className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-foreground transition-colors sm:flex-none [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted"
           >
             Cancel
           </a>
           <button
             type="submit"
             disabled={busy}
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground sm:flex-none [@media(hover:hover)_and_(pointer:fine)]:hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy && <Loader2 className="size-3.5 animate-spin" />}
             {busy
               ? 'Submitting…'
-              : `Submit ${rows.length} instruction${rows.length !== 1 ? 's' : ''}`}
+              : isOnline
+              ? `Submit ${rows.length} instruction${rows.length !== 1 ? 's' : ''}`
+              : `Save ${rows.length} for later`}
           </button>
         </div>
       </div>

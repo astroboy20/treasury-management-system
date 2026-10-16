@@ -11,6 +11,7 @@ import {
   CornerUpLeft,
   ThumbsUp,
   AlertTriangle,
+  WifiOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -28,6 +29,8 @@ import {
 import { approveTransactionAction } from '@/lib/actions/approval.actions'
 import type { ApprovalStage, ApprovalDecision } from '@/lib/schemas/approval.schema'
 import type { TransactionWorkspace } from '@/lib/services/transaction.service'
+import { useNetworkStatus } from '@/lib/hooks/useNetworkStatus'
+import { enqueue } from '@/lib/offline/queue'
 
 // ─── Approval stage configuration ────────────────────────────────────────────
 
@@ -36,9 +39,7 @@ interface StageDef {
   label: string
   roleCode: string
   roleLabel: string
-  /** Transaction status required before this stage becomes active */
   prerequisiteStatus: string
-  /** Transaction status set when this stage is approved */
   approvedStatus: string
 }
 
@@ -98,7 +99,6 @@ const STATUS_ORDER = [
   'COMPLETED',
 ]
 
-// Terminal exception statuses — show in the chain header
 const EXCEPTION_STATUSES = new Set(['RETURNED', 'REJECTED', 'CANCELLED', 'FAILED'])
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -117,17 +117,8 @@ function resolveStageState(stage: StageDef, currentStatus: string): StageState {
   const approvedIdx = STATUS_ORDER.indexOf(stage.approvedStatus)
   const prereqIdx = STATUS_ORDER.indexOf(stage.prerequisiteStatus)
 
-  // If current status is an exception, all stages before the exception are either
-  // completed (if their approved status comes before the last approved one) or locked.
   if (EXCEPTION_STATUSES.has(currentStatus)) {
-    // For RETURNED: a stage is completed if an approval record exists for it
-    // (checked at render via approvals map). Fall back to index for REJECTED/CANCELLED.
-    if (currentStatus === 'RETURNED') {
-      // resolveStageState is called before the approvalMap check in the render loop,
-      // so we return 'locked' here — the render loop upgrades to 'completed' if
-      // an approval record exists.
-      return 'locked'
-    }
+    if (currentStatus === 'RETURNED') return 'locked'
     if (approvedIdx !== -1 && currentIdx !== -1 && approvedIdx < currentIdx) return 'completed'
     return 'locked'
   }
@@ -135,15 +126,6 @@ function resolveStageState(stage: StageDef, currentStatus: string): StageState {
   if (approvedIdx !== -1 && currentIdx !== -1 && approvedIdx <= currentIdx) return 'completed'
   if (prereqIdx !== -1 && currentIdx !== -1 && prereqIdx <= currentIdx) return 'active'
   return 'locked'
-}
-
-/**
- * Returns true if `currentStatus` is at or past `status` in the workflow order.
- */
-function isAtOrPast(currentStatus: string, status: string): boolean {
-  const ci = STATUS_ORDER.indexOf(currentStatus)
-  const si = STATUS_ORDER.indexOf(status)
-  return ci !== -1 && si !== -1 && ci >= si
 }
 
 // ─── Decision badge ───────────────────────────────────────────────────────────
@@ -195,7 +177,6 @@ interface CompletedRowProps {
 function CompletedRow({ stageDef, approval }: CompletedRowProps) {
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-emerald-100 bg-emerald-50/40 p-4">
-      {/* Stage header */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="size-4 shrink-0 text-emerald-600" aria-hidden />
@@ -207,7 +188,6 @@ function CompletedRow({ stageDef, approval }: CompletedRowProps) {
         <DecisionBadge decision={approval.decision} />
       </div>
 
-      {/* Actor + timestamp */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground pl-6">
         {approval.approver?.full_name && (
           <span className="font-medium text-foreground/80">{approval.approver.full_name}</span>
@@ -215,7 +195,6 @@ function CompletedRow({ stageDef, approval }: CompletedRowProps) {
         <time dateTime={approval.approved_at}>{formatDateTime(approval.approved_at)}</time>
       </div>
 
-      {/* Comments (shown for RETURN and REJECT; also optional APPROVE comments) */}
       {approval.comments && (
         <div className="rounded-md border border-border bg-background px-3 py-2 mt-1 ml-6">
           <p className="text-xs text-muted-foreground whitespace-pre-wrap">
@@ -255,6 +234,11 @@ interface ActiveRowProps {
   currentUserId: string
   currentUserRole: string | null
   onActionComplete: () => void
+  /**
+   * AUDIT stage only: whether the audit checklist has been submitted.
+   * Approval buttons are gated until this is true.
+   */
+  auditChecklistDone?: boolean
 }
 
 function ActiveRow({
@@ -264,6 +248,7 @@ function ActiveRow({
   currentUserId,
   currentUserRole,
   onActionComplete,
+  auditChecklistDone,
 }: ActiveRowProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [pendingDecision, setPendingDecision] = useState<ApprovalDecision | null>(null)
@@ -271,11 +256,16 @@ function ActiveRow({
   const [commentsError, setCommentsError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // Req 12.4 — maker-checker: creator cannot approve their own transaction
+  // undefined = not yet hydrated → treat as online to avoid flicker
+  const networkStatus = useNetworkStatus()
+  const isOnline = networkStatus !== false
+
   const isMaker = currentUserId === transactionCreatedBy
-  // Role check: only the required role can act (Req 5.2, 12.4)
   const canAct =
     (currentUserRole === stageDef.roleCode || currentUserRole === 'ADMIN') && !isMaker
+
+  const isAuditStage = stageDef.stage === 'AUDIT'
+  const canApprove = canAct && (!isAuditStage || !!auditChecklistDone)
 
   function openDialog(decision: ApprovalDecision) {
     setPendingDecision(decision)
@@ -293,6 +283,17 @@ function ActiveRow({
 
   async function handleApprove() {
     setSubmitting(true)
+
+    if (!isOnline) {
+      await enqueue({
+        type: 'APPROVE_TRANSACTION',
+        payload: { transactionId, stage: stageDef.stage, decision: 'APPROVE', comments: undefined },
+      })
+      setSubmitting(false)
+      toast.warning("You're offline. Approval queued and will be submitted when you reconnect.")
+      return
+    }
+
     const result = await approveTransactionAction(
       transactionId,
       stageDef.stage,
@@ -312,7 +313,6 @@ function ActiveRow({
   async function handleDialogConfirm() {
     if (!pendingDecision) return
 
-    // Client-side comments validation (schema also validates server-side)
     if (!comments.trim()) {
       setCommentsError(
         pendingDecision === 'RETURN'
@@ -323,6 +323,19 @@ function ActiveRow({
     }
 
     setSubmitting(true)
+
+    if (!isOnline) {
+      await enqueue({
+        type: 'APPROVE_TRANSACTION',
+        payload: { transactionId, stage: stageDef.stage, decision: pendingDecision, comments: comments.trim() },
+      })
+      setSubmitting(false)
+      const label = pendingDecision === 'RETURN' ? 'Recall' : 'Rejection'
+      toast.warning(`You're offline. ${label} queued and will be submitted when you reconnect.`)
+      closeDialog()
+      return
+    }
+
     const result = await approveTransactionAction(
       transactionId,
       stageDef.stage,
@@ -372,42 +385,54 @@ function ActiveRow({
 
         {/* Action area */}
         {canAct ? (
-          <div className="flex flex-wrap items-center gap-2 pt-1 pl-6">
-            {/* Approve */}
-            <Button
-              size="sm"
-              variant="default"
-              onClick={handleApprove}
-              disabled={submitting}
-              className="gap-1.5"
-            >
-              <ThumbsUp className="size-3.5" aria-hidden />
-              Approve
-            </Button>
+          <div className="flex flex-col gap-2 pt-1 pl-6">
+            {/* Audit checklist gate notice */}
+            {isAuditStage && !auditChecklistDone && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                Complete your verification checklist in the Instruction &amp; Verification panel above before approving, recalling, or rejecting.
+              </p>
+            )}
+            {/* Offline notice */}
+            {!isOnline && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-700">
+                <WifiOff className="size-3.5 shrink-0" aria-hidden />
+                Offline — actions will be queued and synced when you reconnect.
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handleApprove}
+                disabled={submitting || !canApprove}
+                className="gap-1.5"
+              >
+                <ThumbsUp className="size-3.5" aria-hidden />
+                {isOnline ? 'Approve' : 'Approve (queued)'}
+              </Button>
 
-            {/* Recall */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => openDialog('RETURN')}
-              disabled={submitting}
-              className="gap-1.5"
-            >
-              <CornerUpLeft className="size-3.5" aria-hidden />
-              Recall
-            </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openDialog('RETURN')}
+                disabled={submitting || !canApprove}
+                className="gap-1.5"
+              >
+                <CornerUpLeft className="size-3.5" aria-hidden />
+                Recall
+              </Button>
 
-            {/* Reject */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => openDialog('REJECT')}
-              disabled={submitting}
-              className="gap-1.5 text-destructive [@media(hover:hover)_and_(pointer:fine)]:hover:text-destructive"
-            >
-              <XCircle className="size-3.5" aria-hidden />
-              Reject
-            </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openDialog('REJECT')}
+                disabled={submitting || !canApprove}
+                className="gap-1.5 text-destructive [@media(hover:hover)_and_(pointer:fine)]:hover:text-destructive"
+              >
+                <XCircle className="size-3.5" aria-hidden />
+                Reject
+              </Button>
+            </div>
           </div>
         ) : (
           <p className="pl-6 text-xs italic text-muted-foreground">
@@ -418,7 +443,7 @@ function ActiveRow({
         )}
       </div>
 
-      {/* Return / Reject dialog — requires mandatory comments (Req 13.4, 12.6, 12.7) */}
+      {/* Return / Reject dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog() }}>
         <DialogContent showCloseButton>
           <DialogHeader>
@@ -442,9 +467,7 @@ function ActiveRow({
               value={comments}
               onChange={(e) => {
                 setComments(e.target.value)
-                if (commentsError && e.target.value.trim()) {
-                  setCommentsError('')
-                }
+                if (commentsError && e.target.value.trim()) setCommentsError('')
               }}
               disabled={submitting}
               aria-describedby={commentsError ? 'comments-error' : undefined}
@@ -461,12 +484,7 @@ function ActiveRow({
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={closeDialog}
-              disabled={submitting}
-            >
+            <Button variant="outline" size="sm" onClick={closeDialog} disabled={submitting}>
               Cancel
             </Button>
             <Button
@@ -493,6 +511,8 @@ interface Step6ApprovalChainProps {
   approvals: TransactionWorkspace['approvals']
   currentUserId: string
   currentUserRole: string | null
+  /** Whether the Audit Officer's checklist has been submitted (gates AUDIT approval buttons) */
+  auditChecklistDone: boolean
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -500,21 +520,11 @@ interface Step6ApprovalChainProps {
 /**
  * Approval Chain Panel.
  *
- * Renders all four approval stages with contextual state per stage:
- *   - `completed` → read-only row: actor, decision badge, timestamp, comments
- *   - `active`    → action row with Approve / Return / Reject buttons (role-gated)
- *   - `locked`    → greyed-out placeholder with locked icon
+ * Renders all five approval stages (Treasury → Head Treasury → MIS → Audit → MD).
+ * For the AUDIT stage, the approval buttons are gated behind the audit checklist
+ * which is completed in the Instruction & Verification panel (Step 2).
  *
- * Stages: Treasury Officer (checker) → Head Treasury → MIS → Audit → MD
- *
- * Rules enforced:
- *   - Treasury Officer checker signs first (must be different from the maker — maker-checker)
- *   - Action buttons only shown when currentUser.role === stage.roleCode AND user ≠ tx creator
- *   - Return/Reject decisions open a Dialog requiring non-empty comments
- *   - Approval submitted via approveTransactionAction; Sonner toast on result
- *   - All five stages always visible for full context
- *
- * Requirements: 12.1, 12.5, 12.6, 12.7, 13.1, 13.2, 13.3, 13.4, 13.5
+ * Requirements: 12.1, 12.5, 12.6, 12.7, 13.1–13.5
  */
 export default function Step6ApprovalChain({
   transactionId,
@@ -523,8 +533,8 @@ export default function Step6ApprovalChain({
   approvals,
   currentUserId,
   currentUserRole,
+  auditChecklistDone,
 }: Step6ApprovalChainProps) {
-  // Build a fast lookup from stage → approval record
   const approvalMap = new Map(approvals.map((a) => [a.stage, a]))
   const isException = EXCEPTION_STATUSES.has(transactionStatus)
   const router = useRouter()
@@ -535,7 +545,7 @@ export default function Step6ApprovalChain({
 
   return (
     <div className="space-y-3">
-      {/* Exception notice — shown when chain is in a terminal exception state */}
+      {/* Exception notice */}
       {isException && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50/60 p-4">
           <AlertTriangle className="size-4 mt-0.5 shrink-0 text-amber-600" aria-hidden />
@@ -564,14 +574,10 @@ export default function Step6ApprovalChain({
         {STAGES.map((stageDef, index) => {
           const existingApproval = approvalMap.get(stageDef.stage)
           const stageState = resolveStageState(stageDef, transactionStatus)
-
-          // A stage with an existing approval record is always completed —
-          // the DB unique constraint prevents duplicate approval records.
           const effectiveState: StageState = existingApproval ? 'completed' : stageState
 
           return (
             <li key={stageDef.stage}>
-              {/* Step number indicator */}
               <div className="mb-1.5 flex items-center gap-1.5">
                 <span
                   className={[
@@ -588,7 +594,6 @@ export default function Step6ApprovalChain({
                 </span>
               </div>
 
-              {/* Stage content */}
               {effectiveState === 'completed' && existingApproval ? (
                 <CompletedRow stageDef={stageDef} approval={existingApproval} />
               ) : effectiveState === 'active' && !isException ? (
@@ -599,15 +604,13 @@ export default function Step6ApprovalChain({
                   currentUserId={currentUserId}
                   currentUserRole={currentUserRole}
                   onActionComplete={handleActionComplete}
+                  auditChecklistDone={stageDef.stage === 'AUDIT' ? auditChecklistDone : undefined}
                 />
               ) : (
                 <LockedRow stageDef={stageDef} />
               )}
 
-              {/* Divider between stages (omit after last) */}
-              {index < STAGES.length - 1 && (
-                <Separator className="mt-3" />
-              )}
+              {index < STAGES.length - 1 && <Separator className="mt-3" />}
             </li>
           )
         })}

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   CheckCircle2,
+  WifiOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,8 @@ import {
   type CustomerConfirmationInput,
 } from "@/lib/schemas/verification.schema";
 import type { TransactionWorkspace } from "@/lib/services/transaction.service";
+import { useNetworkStatus } from "@/lib/hooks/useNetworkStatus";
+import { enqueue } from "@/lib/offline/queue";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -157,6 +160,9 @@ export default function Step3CustomerConfirmation({
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  // undefined = not yet hydrated → treat as online to avoid flicker
+  const networkStatus = useNetworkStatus();
+  const isOnline = networkStatus !== false;
 
   const {
     register,
@@ -183,14 +189,20 @@ export default function Step3CustomerConfirmation({
     setSubmitting(true);
     setServerError(null);
 
+    // ── Offline path ────────────────────────────────────────────────────────
+    if (!isOnline) {
+      await enqueue({ type: "RECORD_CUSTOMER_CONFIRMATION", payload: { transactionId, input: data } });
+      setSubmitting(false);
+      toast.warning("You're offline. Confirmation saved and will be submitted when you reconnect.");
+      return;
+    }
+
     const result = await recordCustomerConfirmationAction(transactionId, data);
     setSubmitting(false);
 
     if (result.success) {
       toast.success("Customer confirmation recorded successfully.");
-      // Stay on the workspace page — Next.js revalidatePath in the server action
-      // will refresh the server component so the panel switches to read-only mode.
-      router.refresh()
+      router.refresh();
     } else {
       const msg = result.error ?? "Submission failed. Please try again.";
       setServerError(msg);
@@ -557,9 +569,15 @@ export default function Step3CustomerConfirmation({
 
         {/* Submit / permission notice */}
         {canAct ? (
-          <div className="flex justify-end pt-1">
+          <div className="flex justify-end gap-3 items-center pt-1">
+            {!isOnline && (
+              <span className="flex items-center gap-1.5 text-xs text-amber-700">
+                <WifiOff className="size-3.5" aria-hidden />
+                Offline — will sync on reconnect
+              </span>
+            )}
             <Button type="submit" disabled={submitting} size="sm">
-              {submitting ? "Recording…" : "Record Confirmation"}
+              {submitting ? "Recording…" : isOnline ? "Record Confirmation" : "Save for later"}
             </Button>
           </div>
         ) : (

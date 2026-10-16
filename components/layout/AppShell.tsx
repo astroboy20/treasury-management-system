@@ -21,6 +21,7 @@ import { signOut } from '@/lib/supabase/client'
 import type { Profile } from '@/lib/services/auth.service'
 import { NotificationBell } from '@/components/treasury/NotificationBell'
 import type { Notification } from '@/lib/services/notification.service'
+import OfflineBanner from '@/components/layout/OfflineBanner'
 
 interface AppShellProps {
   user: { id: string; email: string }
@@ -216,6 +217,9 @@ export default function AppShell({ user, profile, role, initialNotifications, in
             </div>
           </div>
         </header>
+
+        {/* Offline / sync status banner */}
+        <OfflineBanner />
 
         {/* Page content */}
         <div>{children}</div>

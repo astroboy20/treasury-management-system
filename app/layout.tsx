@@ -3,6 +3,7 @@ import { Space_Grotesk } from 'next/font/google'
 import type { Metadata, Viewport } from 'next'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import ServiceWorkerRegistration from '@/components/layout/ServiceWorkerRegistration'
 import './globals.css'
 
 const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space-grotesk' })
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <TooltipProvider>
           {children}
         </TooltipProvider>
+        <ServiceWorkerRegistration />
         <Toaster position="bottom-right" richColors closeButton />
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
